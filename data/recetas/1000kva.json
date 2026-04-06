@@ -1,0 +1,61 @@
+{
+  "nombre": "1000kva",
+  "espesorX10": 27,
+  "secciones": [
+    {
+      "tipo": "BOB",
+      "nombre": "aluminio",
+      "capas": [
+        20.0
+      ],
+      "dirs": [
+        true
+      ],
+      "derivaciones": []
+    },
+    {
+      "tipo": "BOB",
+      "nombre": "alta tension",
+      "capas": [
+        20.0,
+        40.0,
+        50.0,
+        70.0
+      ],
+      "dirs": [
+        true,
+        false,
+        true,
+        false
+      ],
+      "derivaciones": [
+        {
+          "vuelta": 45.0,
+          "etiqueta": "tap1",
+          "mensaje": "realizar corte"
+        },
+        {
+          "vuelta": 58.0,
+          "etiqueta": "tap 2",
+          "mensaje": "realiza separacion"
+        },
+        {
+          "vuelta": 60.0,
+          "etiqueta": "tap3",
+          "mensaje": "introduce papel"
+        }
+      ]
+    },
+    {
+      "tipo": "BAR",
+      "nombre": "papel",
+      "capas": [
+        15.0
+      ],
+      "dirs": [
+        true
+      ],
+      "derivaciones": []
+    }
+  ]
+}

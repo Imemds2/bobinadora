@@ -1,0 +1,137 @@
+{
+  "nombre": "300DY132440",
+  "espesorX10": 25,
+  "secciones": [
+    {
+      "tipo": "BAR",
+      "nombre": "PAPEL",
+      "capas": [
+        13.0
+      ],
+      "dirs": [
+        true
+      ],
+      "derivaciones": []
+    },
+    {
+      "tipo": "BAR",
+      "nombre": "LAMINA",
+      "capas": [
+        26.0
+      ],
+      "dirs": [
+        true
+      ],
+      "derivaciones": [
+        {
+          "vuelta": 5.0,
+          "etiqueta": "SEP",
+          "mensaje": ""
+        },
+        {
+          "vuelta": 10.0,
+          "etiqueta": "SEP",
+          "mensaje": ""
+        },
+        {
+          "vuelta": 15.0,
+          "etiqueta": "SEP",
+          "mensaje": ""
+        },
+        {
+          "vuelta": 20.0,
+          "etiqueta": "SEP",
+          "mensaje": ""
+        },
+        {
+          "vuelta": 25.0,
+          "etiqueta": "SEP",
+          "mensaje": ""
+        }
+      ]
+    },
+    {
+      "tipo": "BAR",
+      "nombre": "PAPEL",
+      "capas": [
+        13.0
+      ],
+      "dirs": [
+        true
+      ],
+      "derivaciones": []
+    },
+    {
+      "tipo": "BOB",
+      "nombre": "ALTA T",
+      "capas": [
+        110.0,
+        220.0,
+        330.0,
+        440.0,
+        550.0,
+        660.0,
+        770.0,
+        880.0,
+        990.0,
+        1100.0,
+        1210.0,
+        1320.0,
+        1418.0
+      ],
+      "dirs": [
+        true,
+        false,
+        true,
+        false,
+        true,
+        false,
+        true,
+        false,
+        true,
+        false,
+        true,
+        false,
+        true
+      ],
+      "derivaciones": [
+        {
+          "vuelta": 641.0,
+          "etiqueta": "TAP1",
+          "mensaje": "SACAR PUNTAS"
+        },
+        {
+          "vuelta": 675.0,
+          "etiqueta": "TAP2",
+          "mensaje": "SACAR PUNTAS"
+        },
+        {
+          "vuelta": 709.0,
+          "etiqueta": "TAP3",
+          "mensaje": "CORTE"
+        },
+        {
+          "vuelta": 743.0,
+          "etiqueta": "TAP4",
+          "mensaje": "SACAR PUNTAS"
+        },
+        {
+          "vuelta": 777.0,
+          "etiqueta": "TAP5",
+          "mensaje": "SACAR PUNTAS"
+        }
+      ]
+    },
+    {
+      "tipo": "BAR",
+      "nombre": "PAPEL",
+      "capas": [
+        6.0
+      ],
+      "dirs": [
+        true
+      ],
+      "derivaciones": []
+    }
+  ]
+}

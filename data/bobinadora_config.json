@@ -1,0 +1,10 @@
+{
+  "espesor_mm": 1.0,
+  "retardo_freno": 1.5,
+  "freno_no": true,
+  "dir_inicial": true,
+  "vueltas_prefreno": 5,
+  "puerto": "COM6",
+  "baudrate": 115200,
+  "tema": "dark"
+}

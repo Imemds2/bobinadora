@@ -1,0 +1,94 @@
+{
+  "nombre": "1500/4801200",
+  "espesorX10": 75,
+  "secciones": [
+    {
+      "tipo": "BAR",
+      "nombre": "papel",
+      "capas": [
+        17.0
+      ],
+      "dirs": [
+        true
+      ],
+      "derivaciones": []
+    },
+    {
+      "tipo": "BAR",
+      "nombre": "aluminio",
+      "capas": [
+        10.0
+      ],
+      "dirs": [
+        true
+      ],
+      "derivaciones": [
+        {
+          "vuelta": 1.0,
+          "etiqueta": "t1",
+          "mensaje": ""
+        },
+        {
+          "vuelta": 2.0,
+          "etiqueta": "t2",
+          "mensaje": ""
+        },
+        {
+          "vuelta": 6.0,
+          "etiqueta": "t4",
+          "mensaje": ""
+        },
+        {
+          "vuelta": 9.0,
+          "etiqueta": "t4",
+          "mensaje": ""
+        }
+      ]
+    },
+    {
+      "tipo": "BOB",
+      "nombre": "papel",
+      "capas": [
+        15.0
+      ],
+      "dirs": [
+        true
+      ],
+      "derivaciones": []
+    },
+    {
+      "tipo": "BOB",
+      "nombre": "at",
+      "capas": [
+        20.0,
+        25.0,
+        30.0,
+        35.0
+      ],
+      "dirs": [
+        true,
+        false,
+        true,
+        false
+      ],
+      "derivaciones": [
+        {
+          "vuelta": 27.0,
+          "etiqueta": "1",
+          "mensaje": ""
+        }
+      ]
+    },
+    {
+      "tipo": "BOB",
+      "nombre": "papel",
+      "capas": [
+        13.0
+      ],
+      "dirs": [
+        true
+      ],
+      "derivaciones": []
+    }
+  ]
+}
