@@ -1,0 +1,67 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+
+# Variables de entorno / secretos
+.env
+.env.*
+*.env
+
+# Logs
+*.log
+logs/
+log/
+
+# Bases de datos locales
+*.db
+*.sqlite
+*.sqlite3
+
+# Archivos temporales
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs / editores
+.vscode/
+.idea/
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Caches varias
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Build / empaquetado
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Datos del proyecto
+data/*
+
+# Excepciones para conservar carpetas vacías
+!data/.gitkeep
+!data/recetas/
+!data/recetas/.gitkeep
