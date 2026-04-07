@@ -1,0 +1,16 @@
+ESTADOS = {
+    "0":  "IDLE",
+    "1":  "BOBINANDO",
+    "2":  "PREFRENO",
+    "3":  "PAUSA CAPA",
+    "4":  "DESBLOQ",
+    "5":  "PAUSA DER",
+    "6":  "DER DESBL",
+    "7":  "ENTRE SEC",
+    "8":  "TERMINADO",
+    "9":  "JOG",
+    "10": "BARRERA",
+    "11": "PAUS BARR",
+    "12": "HOMING",
+    "13": "MANUAL",
+}
