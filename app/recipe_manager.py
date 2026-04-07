@@ -11,6 +11,50 @@ def _filepath(nombre: str):
     return RECIPES_DIR / f"{safe}.json"
 
 
+def validate_recipe(recipe: dict):
+    if not isinstance(recipe, dict):
+        return False, "La receta debe ser un objeto válido"
+
+    nombre = str(recipe.get("nombre", "")).strip()
+    if not nombre:
+        return False, "La receta debe tener un nombre"
+
+    secciones = recipe.get("secciones")
+    if not isinstance(secciones, list) or not secciones:
+        return False, "La receta debe tener al menos una sección"
+
+    for idx, sec in enumerate(secciones, start=1):
+        if not isinstance(sec, dict):
+            return False, f"La sección {idx} no es válida"
+
+        capas = sec.get("capas", [])
+        if not isinstance(capas, list) or not capas:
+            return False, f"La sección {idx} debe tener al menos una capa"
+
+        try:
+            capas_float = [float(c) for c in capas]
+        except Exception:
+            return False, f"La sección {idx} contiene capas inválidas"
+
+        for i in range(1, len(capas_float)):
+            if capas_float[i] <= capas_float[i - 1]:
+                return False, (
+                    f"La sección {idx} debe tener capas acumuladas en orden ascendente"
+                )
+
+        dirs = sec.get("dirs", [])
+        if dirs and len(dirs) != len(capas):
+            return False, (
+                f"La sección {idx} tiene una cantidad de direcciones distinta a sus capas"
+            )
+
+        derivaciones = sec.get("derivaciones", [])
+        if derivaciones and not isinstance(derivaciones, list):
+            return False, f"La sección {idx} tiene derivaciones inválidas"
+
+    return True, "OK"
+
+
 def save_recipe(recipe: dict) -> bool:
     try:
         nombre = recipe.get("nombre", "sin_nombre")
