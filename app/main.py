@@ -7,6 +7,7 @@ from datetime import datetime
 from app.ui.panels.sidebar_panel import SidebarPanel
 from app.ui.panels.monitor_tab import MonitorTab
 from app.ui.panels.control_tab import ControlTab
+from app.ui.panels.position_tab import PositionTab
 
 from app.serial_manager import SerialManager
 from app.recipe_manager import (
@@ -329,178 +330,25 @@ class App(ctk.CTk):
 
     # ── TAB POSICIÓN ──────────────────────────────────────────
     def _build_position_tab(self):
-        tab = self.tabview.tab("  POSICIÓN  ")
-        tab.columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(
-            tab,
-            text="REANUDAR DESDE POSICIÓN",
-            font=ctk.CTkFont(*F_TITLE),
-            text_color=TEXT_PRIMARY,
-        ).pack(pady=(20, 5))
-
-        ctk.CTkLabel(
-            tab,
-            text=(
-                "Introduce la vuelta acumulada desde el inicio de la sección. "
-                "La capa se detecta automáticamente."
-            ),
-            font=ctk.CTkFont(*F_BODY),
-            text_color=TEXT_SECONDARY,
-            wraplength=900,
-        ).pack(pady=(0, 12))
-
-        card = ctk.CTkFrame(tab, fg_color=BG_CARD, corner_radius=10)
-        card.pack(fill="x", padx=40, pady=10)
-        card.columnconfigure((0, 1, 2, 3), weight=1)
-
-        ctk.CTkLabel(
-            card,
-            text="Receta:",
-            font=ctk.CTkFont(*F_BODY_B),
-            text_color=TEXT_PRIMARY,
-        ).grid(row=0, column=0, padx=20, pady=(20, 5), sticky="w")
-
-        self.pos_recipe_var = tk.StringVar()
-        self.pos_recipe_combo = ctk.CTkComboBox(
-            card,
-            variable=self.pos_recipe_var,
-            fg_color=BG_INPUT,
-            border_color=BORDER_COLOR,
-            button_color=BG_CARD,
-            dropdown_fg_color=BG_INPUT,
-            text_color=TEXT_PRIMARY,
-            font=ctk.CTkFont(*F_BODY),
-            width=320,
-            command=self._on_pos_recipe_change,
+        self.position_tab = PositionTab(
+            self.tabview,
+            on_recipe_change=self._on_pos_recipe_change,
+            on_section_change=lambda v=None: self._update_pos_info(),
+            on_inc_vuelta=self._inc_pos,
+            on_apply_position=self._apply_position,
         )
-        self.pos_recipe_combo.grid(
-            row=0, column=1, padx=10, pady=(20, 5), sticky="ew", columnspan=3
-        )
+        self.position_tab.build()
 
-        ctk.CTkLabel(
-            card,
-            text="Sección:",
-            font=ctk.CTkFont(*F_BODY_B),
-            text_color=TEXT_PRIMARY,
-        ).grid(row=1, column=0, padx=20, pady=10, sticky="w")
-
-        self.pos_sec_var = tk.StringVar(value="1")
-        self.pos_sec_combo = ctk.CTkComboBox(
-            card,
-            variable=self.pos_sec_var,
-            values=["1"],
-            fg_color=BG_INPUT,
-            border_color=BORDER_COLOR,
-            button_color=BG_CARD,
-            dropdown_fg_color=BG_INPUT,
-            text_color=TEXT_PRIMARY,
-            font=ctk.CTkFont(*F_BODY),
-            width=130,
-            command=lambda v: self._update_pos_info(),
-        )
-        self.pos_sec_combo.grid(row=1, column=1, padx=10, pady=10, sticky="w")
-
-        self.pos_sec_info = ctk.CTkLabel(
-            card,
-            text="",
-            font=ctk.CTkFont(*F_BODY),
-            text_color=ACCENT_PURPLE,
-        )
-        self.pos_sec_info.grid(row=1, column=2, padx=10, pady=10, sticky="w", columnspan=2)
-
-        ctk.CTkLabel(
-            card,
-            text="Capa detectada:",
-            font=ctk.CTkFont(*F_BODY_B),
-            text_color=TEXT_PRIMARY,
-        ).grid(row=2, column=0, padx=20, pady=10, sticky="w")
-
-        self.pos_capa_var = tk.StringVar(value="--")
-        ctk.CTkLabel(
-            card,
-            textvariable=self.pos_capa_var,
-            font=ctk.CTkFont(*F_BIG),
-            text_color=ACCENT_ORANGE,
-        ).grid(row=2, column=1, padx=10, pady=10, sticky="w")
-
-        self.pos_capa_info = ctk.CTkLabel(
-            card,
-            text="",
-            font=ctk.CTkFont(*F_BODY),
-            text_color=ACCENT_YELLOW,
-        )
-        self.pos_capa_info.grid(row=2, column=2, padx=20, pady=10, sticky="w", columnspan=2)
-
-        ctk.CTkLabel(
-            card,
-            text="Vuelta acumulada:",
-            font=ctk.CTkFont(*F_BODY_B),
-            text_color=TEXT_PRIMARY,
-        ).grid(row=3, column=0, padx=20, pady=10, sticky="w")
-
-        self.pos_vuelta_var = tk.StringVar(value="0.0")
-        ctk.CTkEntry(
-            card,
-            textvariable=self.pos_vuelta_var,
-            fg_color=BG_INPUT,
-            border_color=BORDER_COLOR,
-            text_color=ACCENT_GREEN,
-            font=ctk.CTkFont(*F_BIG),
-            width=210,
-            justify="center",
-        ).grid(row=3, column=1, padx=10, pady=10, sticky="w")
-
-        vb = ctk.CTkFrame(card, fg_color="transparent")
-        vb.grid(row=3, column=2, padx=5, pady=10, sticky="w", columnspan=2)
-
-        for delta, label, color in [
-            (100, "+100", ACCENT_GREEN),
-            (10, "+10", ACCENT_GREEN),
-            (1, "+1", ACCENT_BLUE),
-            (-1, "-1", ACCENT_ORANGE),
-            (-10, "-10", ACCENT_RED),
-            (-100, "-100", ACCENT_RED),
-        ]:
-            ctk.CTkButton(
-                vb,
-                text=label,
-                width=74,
-                height=42,
-                font=ctk.CTkFont("Consolas", 13, "bold"),
-                fg_color=BG_INPUT,
-                hover_color=BORDER_COLOR,
-                text_color=color,
-                command=lambda d=delta: self._inc_pos("vuelta", d),
-            ).pack(side="left", padx=3)
-
-        ctk.CTkLabel(
-            card,
-            text="Vueltas acumuladas desde inicio de sección — ej: S4 C5 = 461v",
-            font=ctk.CTkFont(*F_SMALL),
-            text_color=TEXT_SECONDARY,
-        ).grid(row=4, column=0, columnspan=4, padx=20, pady=(0, 14), sticky="w")
-
-        ctk.CTkButton(
-            tab,
-            text="▶  INICIAR DESDE ESTA POSICIÓN",
-            command=self._apply_position,
-            fg_color=ACCENT_GREEN,
-            hover_color="#00CC6A",
-            text_color=BG_DARK,
-            height=62,
-            width=500,
-            font=ctk.CTkFont("Consolas", 18, "bold"),
-        ).pack(pady=18)
-
-        self.pos_summary = ctk.CTkLabel(
-            tab,
-            text="",
-            font=ctk.CTkFont(*F_BODY),
-            text_color=ACCENT_YELLOW,
-        )
-        self.pos_summary.pack()
-
+        # Referencias puente para mantener compatibilidad temporal
+        self.pos_recipe_var = self.position_tab.pos_recipe_var
+        self.pos_recipe_combo = self.position_tab.pos_recipe_combo
+        self.pos_sec_var = self.position_tab.pos_sec_var
+        self.pos_sec_combo = self.position_tab.pos_sec_combo
+        self.pos_sec_info = self.position_tab.pos_sec_info
+        self.pos_capa_var = self.position_tab.pos_capa_var
+        self.pos_capa_info = self.position_tab.pos_capa_info
+        self.pos_vuelta_var = self.position_tab.pos_vuelta_var
+        self.pos_summary = self.position_tab.pos_summary
     # ── TAB CONFIGURACIÓN ─────────────────────────────────────
     def _build_config_tab(self):
         tab = self.tabview.tab("  CONFIGURACIÓN  ")
@@ -915,12 +763,17 @@ class App(ctk.CTk):
 
         n = len(rec.get("secciones", []))
         vals = [str(i + 1) for i in range(n)]
-        self.pos_sec_combo.configure(values=vals)
+        if hasattr(self, "position_tab") and self.position_tab:
+            self.position_tab.set_section_values(vals)
+            if vals:
+                self.position_tab.set_section(vals[0])
+            self.position_tab.set_vuelta("0.0")
+        else:
+            self.pos_sec_combo.configure(values=vals)
+            if vals:
+                self.pos_sec_var.set(vals[0])
+            self.pos_vuelta_var.set("0.0")
 
-        if vals:
-            self.pos_sec_var.set(vals[0])
-
-        self.pos_vuelta_var.set("0.0")
         self._update_pos_info()
 
     def _update_pos_info(self):
@@ -935,7 +788,10 @@ class App(ctk.CTk):
             nom = sec.get("nombre", "")
             capas = sec.get("capas", [])
 
-            self.pos_sec_info.configure(text=f"{nom}  [{tipo}]")
+            if hasattr(self, "position_tab") and self.position_tab:
+                self.position_tab.set_section_info(f"{nom}  [{tipo}]")
+            else:
+                self.pos_sec_info.configure(text=f"{nom}  [{tipo}]")
 
             if not capas:
                 self.pos_capa_info.configure(text="")
@@ -968,16 +824,24 @@ class App(ctk.CTk):
             vueltas_capa = round(meta - ant, 1)
             d = "->" if sec["dirs"][capa_idx] else "<-"
 
-            self.pos_capa_var.set(str(capa_num))
-            self.pos_capa_info.configure(
-                text=(
-                    f"Capa {capa_num} ({vueltas_capa:.0f}v)  {d}\n"
-                    f"Rango: 0 – {total_sec:.0f}v acum."
-                )
+            if hasattr(self, "position_tab") and self.position_tab:
+                self.position_tab.set_capa(str(capa_num))
+            else:
+                self.pos_capa_var.set(str(capa_num))
+            capa_info_text = (
+                f"Capa {capa_num} ({vueltas_capa:.0f}v)  {d}\n"
+                f"Rango: 0 – {total_sec:.0f}v acum."
             )
+            if hasattr(self, "position_tab") and self.position_tab:
+                self.position_tab.set_capa_info(capa_info_text)
+            else:
+                self.pos_capa_info.configure(text=capa_info_text)
 
         except (IndexError, ValueError):
-            self.pos_capa_info.configure(text="")
+            if hasattr(self, "position_tab") and self.position_tab:
+                self.position_tab.set_capa_info("")
+            else:
+                self.pos_capa_info.configure(text="")
 
     def _inc_pos(self, field, delta):
         if field == "vuelta":
@@ -993,7 +857,10 @@ class App(ctk.CTk):
 
                 v = round(float(self.pos_vuelta_var.get()) + delta, 1)
                 v = max(0.0, min(v, total))
-                self.pos_vuelta_var.set(str(v))
+                if hasattr(self, "position_tab") and self.position_tab:
+                    self.position_tab.set_vuelta(str(v))
+                else:
+                    self.pos_vuelta_var.set(str(v))
                 self._update_pos_info()
             except (ValueError, IndexError):
                 pass
@@ -1116,8 +983,10 @@ class App(ctk.CTk):
 
             self.after(
                 0,
-                lambda: self.pos_summary.configure(
-                    text=f"✓ S{sec_num} C{capa_num} @{vuelta_acum}v"
+                lambda: (
+                    self.position_tab.set_summary(f"✓ S{sec_num} C{capa_num} @{vuelta_acum}v")
+                    if hasattr(self, "position_tab") and self.position_tab
+                    else self.pos_summary.configure(text=f"✓ S{sec_num} C{capa_num} @{vuelta_acum}v")
                 )
             )
             self.after(
@@ -1179,7 +1048,9 @@ class App(ctk.CTk):
         else:
             self.run_combo.configure(values=names)
 
-        if hasattr(self, "pos_recipe_combo"):
+        if hasattr(self, "position_tab") and self.position_tab:
+            self.position_tab.set_recipe_values(names)
+        elif hasattr(self, "pos_recipe_combo"):
             self.pos_recipe_combo.configure(values=names)
 
         for name in names:
