@@ -3,95 +3,54 @@ import tkinter as tk
 from tkinter import messagebox
 import threading
 import time
-import json
 from datetime import datetime
+from app.ui.panels.sidebar_panel import SidebarPanel
+from app.ui.panels.monitor_tab import MonitorTab
+from app.ui.panels.control_tab import ControlTab
 
-from .serial_manager import SerialManager
-from .recipe_manager import (
+from app.serial_manager import SerialManager
+from app.recipe_manager import (
     validate_recipe,
     save_recipe,
     load_recipe,
     list_recipes,
     delete_recipe,
 )
-from .paths import CONFIG_FILE
-from .protocol import parse_status_msg
+from app.protocol import parse_status_msg
 
+from app.core.theme import (
+    BG_DARK,
+    BG_PANEL,
+    BG_CARD,
+    BG_INPUT,
+    ACCENT_GREEN,
+    ACCENT_RED,
+    ACCENT_YELLOW,
+    ACCENT_BLUE,
+    ACCENT_ORANGE,
+    ACCENT_PURPLE,
+    TEXT_PRIMARY,
+    TEXT_SECONDARY,
+    BORDER_COLOR,
+    F_TITLE,
+    F_HEAD,
+    F_BODY,
+    F_BODY_B,
+    F_BIG,
+    F_SMALL,
+    DIR_FWD_COLOR,
+    DIR_REV_COLOR,
+    setup_theme,
+)
+from app.core.constants import ESTADOS
+from app.core.config_store import cargar_config, guardar_config
 
-# ── Paleta ────────────────────────────────────────────────────
-BG_DARK        = "#0D1117"
-BG_PANEL       = "#161B22"
-BG_CARD        = "#1C2128"
-BG_INPUT       = "#21262D"
-ACCENT_GREEN   = "#00FF88"
-ACCENT_RED     = "#FF3B3B"
-ACCENT_YELLOW  = "#FFB800"
-ACCENT_BLUE    = "#58A6FF"
-ACCENT_ORANGE  = "#F78166"
-ACCENT_PURPLE  = "#BC8CFF"
-TEXT_PRIMARY   = "#E6EDF3"
-TEXT_SECONDARY = "#8B949E"
-BORDER_COLOR   = "#30363D"
-DIR_FWD_COLOR  = "#00FF88"
-DIR_REV_COLOR  = "#FF3B3B"
-
-F_TITLE  = ("Consolas", 24, "bold")
-F_HEAD   = ("Consolas", 16, "bold")
-F_BODY   = ("Consolas", 14)
-F_BODY_B = ("Consolas", 14, "bold")
-F_BIG    = ("Consolas", 36, "bold")
-F_SMALL  = ("Consolas", 12)
-
-ESTADOS = {
-    "0":  "IDLE",
-    "1":  "BOBINANDO",
-    "2":  "PREFRENO",
-    "3":  "PAUSA CAPA",
-    "4":  "DESBLOQ",
-    "5":  "PAUSA DER",
-    "6":  "DER DESBL",
-    "7":  "ENTRE SEC",
-    "8":  "TERMINADO",
-    "9":  "JOG",
-    "10": "BARRERA",
-    "11": "PAUS BARR",
-    "12": "HOMING",
-    "13": "MANUAL",
-}
-
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("dark-blue")
-
-
-def cargar_config() -> dict:
-    defaults = {
-        "espesor_mm": 1.0,
-        "retardo_freno": 1.5,
-        "freno_no": True,
-        "dir_inicial": True,
-        "vueltas_prefreno": 5,
-        "puerto": "",
-        "baudrate": 115200,
-    }
-
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, encoding="utf-8") as f:
-                data = json.load(f)
-            defaults.update(data)
-        except Exception:
-            pass
-
-    return defaults
-
-
-def guardar_config(cfg: dict):
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
-
+from app.ui.dialogs.recipe_form import RecipeForm
+from app.ui.panels.header_panel import HeaderPanel
 
 class App(ctk.CTk):
     def __init__(self):
+        setup_theme()
         super().__init__()
         self.title("BOBINADORA HMI  v5.3")
         self.geometry("1920x1080")
@@ -154,143 +113,40 @@ class App(ctk.CTk):
         self._build_tabs(content)
 
     def _build_header(self):
-        hdr = ctk.CTkFrame(
-            self,
-            fg_color=BG_PANEL,
-            height=68,
-            corner_radius=0,
-        )
-        hdr.pack(fill="x")
-        hdr.pack_propagate(False)
+        self.header_panel = HeaderPanel(self)
+        self.header_panel.build()
 
-        ctk.CTkLabel(
-            hdr,
-            text="⚙  BOBINADORA HMI",
-            font=ctk.CTkFont(*F_TITLE),
-            text_color=ACCENT_GREEN,
-        ).pack(side="left", padx=24)
-
-        self.conn_indicator = ctk.CTkLabel(
-            hdr,
-            text="● DESCONECTADO",
-            font=ctk.CTkFont(*F_BODY_B),
-            text_color=ACCENT_RED,
-        )
-        self.conn_indicator.pack(side="right", padx=24)
-
-        self.clock_label = ctk.CTkLabel(
-            hdr,
-            text="",
-            font=ctk.CTkFont(*F_BODY),
-            text_color=TEXT_SECONDARY,
-        )
-        self.clock_label.pack(side="right", padx=24)
+        self.conn_indicator = self.header_panel.conn_indicator
+        self.clock_label = self.header_panel.clock_label
 
         self._update_clock()
 
     def _build_sidebar(self, parent):
-        sb = ctk.CTkFrame(
+        self.sidebar_panel = SidebarPanel(
             parent,
-            fg_color=BG_PANEL,
-            width=270,
-            corner_radius=8,
+            cfg=self.cfg,
+            on_refresh_ports=self._refresh_ports,
+            on_toggle_connect=self._toggle_connect,
         )
-        sb.grid(row=0, column=0, sticky="nsew")
-        sb.pack_propagate(False)
+        self.sidebar_panel.build()
 
-        ctk.CTkLabel(
-            sb,
-            text="CONEXIÓN SERIAL",
-            font=ctk.CTkFont(*F_SMALL, "bold"),
-            text_color=TEXT_SECONDARY,
-        ).pack(pady=(18, 4), padx=15, anchor="w")
+        # Referencias puente para mantener compatibilidad
+        self.port_var = self.sidebar_panel.port_var
+        self.port_combo = self.sidebar_panel.port_combo
+        self.btn_connect = self.sidebar_panel.btn_connect
 
-        self.port_var = tk.StringVar(value=self.cfg.get("puerto", ""))
-
-        self.port_combo = ctk.CTkComboBox(
-            sb,
-            variable=self.port_var,
-            width=240,
-            fg_color=BG_INPUT,
-            border_color=BORDER_COLOR,
-            button_color=BG_CARD,
-            dropdown_fg_color=BG_INPUT,
-            text_color=TEXT_PRIMARY,
-            font=ctk.CTkFont(*F_BODY),
-        )
-        self.port_combo.pack(padx=15, pady=4)
-
-        ctk.CTkButton(
-            sb,
-            text="⟳  ACTUALIZAR",
-            command=self._refresh_ports,
-            fg_color=BG_CARD,
-            hover_color=BG_INPUT,
-            border_color=BORDER_COLOR,
-            border_width=1,
-            text_color=TEXT_SECONDARY,
-            height=36,
-            font=ctk.CTkFont(*F_SMALL),
-        ).pack(padx=15, pady=3, fill="x")
-
-        self.btn_connect = ctk.CTkButton(
-            sb,
-            text="CONECTAR",
-            command=self._toggle_connect,
-            fg_color=ACCENT_GREEN,
-            hover_color="#00CC6A",
-            text_color=BG_DARK,
-            height=44,
-            font=ctk.CTkFont(*F_BODY_B),
-        )
-        self.btn_connect.pack(padx=15, pady=(4, 12), fill="x")
-
-        ctk.CTkFrame(
-            sb,
-            height=1,
-            fg_color=BORDER_COLOR,
-        ).pack(fill="x", padx=15)
-
-        ctk.CTkLabel(
-            sb,
-            text="ESTADO CONTROLADOR",
-            font=ctk.CTkFont(*F_SMALL, "bold"),
-            text_color=TEXT_SECONDARY,
-        ).pack(pady=(10, 4), padx=15, anchor="w")
-
-        self._ind(sb, "ESTADO",   self.esp_estado,   ACCENT_BLUE)
-        self._ind(sb, "RECETA",   self.esp_rec,      ACCENT_YELLOW)
-        self._ind(sb, "SECCIÓN",  self.esp_sec,      ACCENT_PURPLE)
-        self._ind(sb, "TIPO",     self.esp_tsec,     ACCENT_ORANGE)
-        self._ind(sb, "CAPA",     self.esp_capa,     ACCENT_YELLOW)
-        self._ind(sb, "TOTAL C.", self.esp_tcap,     TEXT_SECONDARY)
-        self._ind(sb, "PROX PAR", self.esp_meta,     ACCENT_GREEN)
-        self._ind(sb, "VUELTAS",  self.esp_vueltas,  ACCENT_GREEN)
-        self._ind(sb, "RPM",      self.esp_rpm,      ACCENT_ORANGE)
-        self._ind(sb, "POSICIÓN", self.esp_pos,      ACCENT_BLUE)
-
-        ctk.CTkFrame(
-            sb,
-            height=1,
-            fg_color=BORDER_COLOR,
-        ).pack(fill="x", padx=15, pady=6)
-
-        fv = ctk.CTkFrame(sb, fg_color=BG_CARD, corner_radius=6)
-        fv.pack(padx=15, fill="x")
-
-        ctk.CTkLabel(
-            fv,
-            textvariable=self.esp_freno,
-            font=ctk.CTkFont(*F_SMALL, "bold"),
-            text_color=TEXT_SECONDARY,
-        ).pack(side="left", padx=10, pady=8)
-
-        ctk.CTkLabel(
-            fv,
-            textvariable=self.esp_variador,
-            font=ctk.CTkFont(*F_SMALL, "bold"),
-            text_color=TEXT_SECONDARY,
-        ).pack(side="right", padx=10, pady=8)
+        self.esp_estado = self.sidebar_panel.esp_estado
+        self.esp_rec = self.sidebar_panel.esp_rec
+        self.esp_sec = self.sidebar_panel.esp_sec
+        self.esp_tsec = self.sidebar_panel.esp_tsec
+        self.esp_capa = self.sidebar_panel.esp_capa
+        self.esp_tcap = self.sidebar_panel.esp_tcap
+        self.esp_meta = self.sidebar_panel.esp_meta
+        self.esp_vueltas = self.sidebar_panel.esp_vueltas
+        self.esp_rpm = self.sidebar_panel.esp_rpm
+        self.esp_pos = self.sidebar_panel.esp_pos
+        self.esp_freno = self.sidebar_panel.esp_freno
+        self.esp_variador = self.sidebar_panel.esp_variador
 
     def _ind(self, parent, label, var, color):
         f = ctk.CTkFrame(parent, fg_color=BG_CARD, corner_radius=6)
@@ -340,374 +196,51 @@ class App(ctk.CTk):
         self._build_monitor_tab()
 
     # ── TAB CONTROL ───────────────────────────────────────────
+
     def _build_control_tab(self):
-        tab = self.tabview.tab("  CONTROL  ")
-        tab.columnconfigure((0, 1, 2, 3, 4, 5), weight=1)
-
-        ctk.CTkLabel(
-            tab,
-            text="PANEL DE CONTROL",
-            font=ctk.CTkFont(*F_TITLE),
-            text_color=TEXT_PRIMARY,
-        ).grid(row=0, column=0, columnspan=6, pady=(15, 10))
-
-        mf = ctk.CTkFrame(tab, fg_color="transparent")
-        mf.grid(row=1, column=0, columnspan=6, sticky="ew", padx=20)
-        mf.columnconfigure((0, 1, 2, 3, 4, 5), weight=1)
-
-        self._metric(mf, "VUELTAS", self.esp_vueltas, ACCENT_GREEN, 0)
-        self._metric(mf, "PROX PARADA", self.esp_meta, ACCENT_YELLOW, 1)
-        self._metric(mf, "CAPA", self.esp_capa, ACCENT_ORANGE, 2)
-        self._metric(mf, "RPM", self.esp_rpm, ACCENT_BLUE, 3)
-        self._metric(mf, "SECCIÓN", self.esp_sec, ACCENT_PURPLE, 4)
-        self._metric(mf, "TIPO", self.esp_tsec, ACCENT_ORANGE, 5)
-
-        self.alert_frame = ctk.CTkFrame(
-            tab,
-            fg_color=BG_CARD,
-            corner_radius=10,
-            height=60,
+        self.control_tab = ControlTab(
+            self.tabview,
+            metrics={
+                "esp_vueltas": self.esp_vueltas,
+                "esp_meta": self.esp_meta,
+                "esp_capa": self.esp_capa,
+                "esp_rpm": self.esp_rpm,
+                "esp_sec": self.esp_sec,
+                "esp_tsec": self.esp_tsec,
+            },
+            on_start=self._cmd_start,
+            on_stop=self._cmd_stop,
+            on_reset=self._cmd_reset,
+            on_homing=self._cmd_homing,
+            on_run_recipe=self._run_selected_recipe,
+            on_manual_toggle=self._cmd_manual_toggle,
+            on_set_jog_step=self._set_jog_paso,
+            on_set_jog_step_manual=self._set_jog_paso_manual,
+            on_jog_left_single=lambda: self._jog_pulso("left"),
+            on_jog_right_single=lambda: self._jog_pulso("right"),
+            on_jog_left_press=self._on_jog_left_press_ui,
+            on_jog_left_release=self._on_jog_left_release_ui,
+            on_jog_right_press=self._on_jog_right_press_ui,
+            on_jog_right_release=self._on_jog_right_release_ui,
         )
-        self.alert_frame.grid(
-            row=2,
-            column=0,
-            columnspan=6,
-            sticky="ew",
-            padx=20,
-            pady=8,
-        )
-        self.alert_frame.pack_propagate(False)
+        self.control_tab.build()
 
-        self.alert_label = ctk.CTkLabel(
-            self.alert_frame,
-            text="Sistema listo — Conecte el controlador",
-            font=ctk.CTkFont("Consolas", 15, "bold"),
-            text_color=TEXT_SECONDARY,
-        )
-        self.alert_label.pack(expand=True)
+        # Referencias puente para mantener compatibilidad temporal
+        self.alert_label = self.control_tab.alert_label
+        self.btn_manual = self.control_tab.btn_manual
+        self.run_recipe_var = self.control_tab.run_recipe_var
+        self.run_combo = self.control_tab.run_combo
 
-        bf = ctk.CTkFrame(tab, fg_color="transparent")
-        bf.grid(row=3, column=0, columnspan=6, pady=10)
-
-        self._ctrl_btn(
-            bf, "▶  START", ACCENT_GREEN, "#00CC6A",
-            BG_DARK, self._cmd_start, 0
-        )
-        self._ctrl_btn(
-            bf, "■  STOP", ACCENT_RED, "#CC2222",
-            TEXT_PRIMARY, self._cmd_stop, 1
-        )
-        self._ctrl_btn(
-            bf, "↺  RESET", ACCENT_YELLOW, "#CC9200",
-            BG_DARK, self._cmd_reset, 2
-        )
-        self._ctrl_btn(
-            bf, "⌂  HOMING", ACCENT_BLUE, "#4080CC",
-            TEXT_PRIMARY, self._cmd_homing, 3
-        )
-
-        # ── Modo Manual ───────────────────────────────────────
-        mf2 = ctk.CTkFrame(tab, fg_color=BG_CARD, corner_radius=8)
-        mf2.grid(row=4, column=0, columnspan=6, sticky="ew", padx=20, pady=(0, 6))
-
-        ctk.CTkLabel(
-            mf2,
-            text="MODO MANUAL — sin receta, motor libre con pedal",
-            font=ctk.CTkFont(*F_SMALL),
-            text_color=TEXT_SECONDARY,
-        ).pack(side="left", padx=16, pady=12)
-
-        self.btn_manual = ctk.CTkButton(
-            mf2,
-            text="⚙  ACTIVAR MODO MANUAL",
-            command=self._cmd_manual_toggle,
-            fg_color=ACCENT_ORANGE,
-            hover_color="#CC6633",
-            text_color=BG_DARK,
-            height=44,
-            width=260,
-            font=ctk.CTkFont(*F_BODY_B),
-        )
-        self.btn_manual.pack(side="right", padx=16, pady=10)
-
-        # ── Panel JOG ─────────────────────────────────────────
-        jf = ctk.CTkFrame(tab, fg_color=BG_CARD, corner_radius=10)
-        jf.grid(row=5, column=0, columnspan=6, sticky="ew", padx=20, pady=(0, 8))
-
-        jog_title = ctk.CTkFrame(jf, fg_color="transparent")
-        jog_title.pack(fill="x", padx=16, pady=(14, 6))
-
-        ctk.CTkLabel(
-            jog_title,
-            text="MOVIMIENTO MANUAL  (JOG HUSILLO)",
-            font=ctk.CTkFont(*F_HEAD),
-            text_color=TEXT_SECONDARY,
-        ).pack(side="left")
-
-        self.jog_pos_label = ctk.CTkLabel(
-            jog_title,
-            text="Pos: 0.00 cm",
-            font=ctk.CTkFont("Consolas", 14, "bold"),
-            text_color=ACCENT_BLUE,
-        )
-        self.jog_pos_label.pack(side="right")
-
-        paso_frame = ctk.CTkFrame(jf, fg_color=BG_INPUT, corner_radius=8)
-        paso_frame.pack(fill="x", padx=16, pady=(0, 10))
-
-        ctk.CTkLabel(
-            paso_frame,
-            text="  Paso por pulsación:",
-            font=ctk.CTkFont(*F_BODY_B),
-            text_color=TEXT_PRIMARY,
-        ).pack(side="left", padx=(10, 12), pady=10)
-
-        self.jog_paso_var = tk.DoubleVar(value=1.0)
-        self.jog_paso_btns = {}
-
-        for mm in [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0]:
-            lbl = (f"{mm:.1f}".rstrip("0").rstrip(".") or "0") + "mm"
-            btn = ctk.CTkButton(
-                paso_frame,
-                text=lbl,
-                width=72,
-                height=40,
-                font=ctk.CTkFont("Consolas", 13, "bold"),
-                fg_color=BG_CARD,
-                hover_color=BORDER_COLOR,
-                text_color=TEXT_SECONDARY,
-                corner_radius=6,
-                command=lambda m=mm: self._set_jog_paso(m),
-            )
-            btn.pack(side="left", padx=4, pady=8)
-            self.jog_paso_btns[mm] = btn
-
-        ctk.CTkLabel(
-            paso_frame,
-            text="  Manual:",
-            font=ctk.CTkFont(*F_SMALL),
-            text_color=TEXT_SECONDARY,
-        ).pack(side="left", padx=(12, 4))
-
-        self.jog_paso_entry = ctk.CTkEntry(
-            paso_frame,
-            fg_color=BG_CARD,
-            border_color=BORDER_COLOR,
-            text_color=ACCENT_GREEN,
-            font=ctk.CTkFont("Consolas", 13),
-            width=80,
-            justify="center",
-        )
-        self.jog_paso_entry.insert(0, "1.0")
-        self.jog_paso_entry.pack(side="left", padx=4, pady=8)
-
-        ctk.CTkButton(
-            paso_frame,
-            text="✓",
-            width=40,
-            height=40,
-            fg_color=ACCENT_GREEN,
-            hover_color="#00CC6A",
-            text_color=BG_DARK,
-            font=ctk.CTkFont("Consolas", 14, "bold"),
-            command=self._set_jog_paso_manual,
-        ).pack(side="left", padx=(2, 10), pady=8)
-
-        self._set_jog_paso(1.0)
-
-        jog_btn_row = ctk.CTkFrame(jf, fg_color="transparent")
-        jog_btn_row.pack(pady=(0, 6))
-
-        self.jog_left_single = ctk.CTkButton(
-            jog_btn_row,
-            text="◀  ←",
-            fg_color="#1C3A5C",
-            hover_color="#2A5580",
-            text_color=ACCENT_BLUE,
-            height=60,
-            width=130,
-            font=ctk.CTkFont("Consolas", 16, "bold"),
-            corner_radius=8,
-            command=lambda: self._jog_pulso("left"),
-        )
-        self.jog_left_single.pack(side="left", padx=6)
-
-        self.jog_left_btn = ctk.CTkButton(
-            jog_btn_row,
-            text="◀◀  CONTINUO",
-            fg_color="#1C3A5C",
-            hover_color="#2A5580",
-            text_color=ACCENT_BLUE,
-            height=60,
-            width=180,
-            font=ctk.CTkFont("Consolas", 15, "bold"),
-            corner_radius=8,
-        )
-        self.jog_left_btn.pack(side="left", padx=6)
-        self.jog_left_btn.bind(
-            "<ButtonPress-1>",
-            lambda e: self._jog_start("left")
-        )
-        self.jog_left_btn.bind(
-            "<ButtonRelease-1>",
-            lambda e: self._jog_stop()
-        )
-
-        center_frame = ctk.CTkFrame(
-            jog_btn_row,
-            fg_color=BG_INPUT,
-            corner_radius=8,
-            width=140,
-        )
-        center_frame.pack(side="left", padx=6)
-        center_frame.pack_propagate(False)
-
-        self.jog_status = ctk.CTkLabel(
-            center_frame,
-            text="◉ PARADO",
-            font=ctk.CTkFont("Consolas", 11, "bold"),
-            text_color=TEXT_SECONDARY,
-        )
-        self.jog_status.pack(expand=True, pady=(6, 2))
-
-        self.jog_paso_actual = ctk.CTkLabel(
-            center_frame,
-            text="1.0mm",
-            font=ctk.CTkFont("Consolas", 11),
-            text_color=ACCENT_YELLOW,
-        )
-        self.jog_paso_actual.pack(expand=True, pady=(0, 6))
-
-        self.jog_right_btn = ctk.CTkButton(
-            jog_btn_row,
-            text="CONTINUO  ▶▶",
-            fg_color="#1C3A5C",
-            hover_color="#2A5580",
-            text_color=ACCENT_BLUE,
-            height=60,
-            width=180,
-            font=ctk.CTkFont("Consolas", 15, "bold"),
-            corner_radius=8,
-        )
-        self.jog_right_btn.pack(side="left", padx=6)
-        self.jog_right_btn.bind(
-            "<ButtonPress-1>",
-            lambda e: self._jog_start("right")
-        )
-        self.jog_right_btn.bind(
-            "<ButtonRelease-1>",
-            lambda e: self._jog_stop()
-        )
-
-        self.jog_right_single = ctk.CTkButton(
-            jog_btn_row,
-            text="→  ▶",
-            fg_color="#1C3A5C",
-            hover_color="#2A5580",
-            text_color=ACCENT_BLUE,
-            height=60,
-            width=130,
-            font=ctk.CTkFont("Consolas", 16, "bold"),
-            corner_radius=8,
-            command=lambda: self._jog_pulso("right"),
-        )
-        self.jog_right_single.pack(side="left", padx=6)
-
-        nota_frame = ctk.CTkFrame(jf, fg_color="transparent")
-        nota_frame.pack(fill="x", padx=16, pady=(0, 12))
-
-        ctk.CTkLabel(
-            nota_frame,
-            text="◀▶ Pulso exacto    ◀◀▶▶ Continuo (mantener)",
-            font=ctk.CTkFont(*F_SMALL),
-            text_color=TEXT_SECONDARY,
-        ).pack(side="left")
-
-        ctk.CTkButton(
-            nota_frame,
-            text="⌂ IR A CERO",
-            command=self._cmd_homing,
-            fg_color=BG_CARD,
-            hover_color=BG_INPUT,
-            border_color=BORDER_COLOR,
-            border_width=1,
-            text_color=TEXT_SECONDARY,
-            height=34,
-            width=130,
-            font=ctk.CTkFont(*F_SMALL),
-        ).pack(side="right")
-
-        # Ejecutar receta
-        qf = ctk.CTkFrame(tab, fg_color=BG_CARD, corner_radius=8)
-        qf.grid(row=6, column=0, columnspan=6, sticky="ew", padx=20, pady=(0, 14))
-
-        ctk.CTkLabel(
-            qf,
-            text="EJECUTAR RECETA",
-            font=ctk.CTkFont(*F_HEAD),
-            text_color=TEXT_SECONDARY,
-        ).pack(pady=(12, 6))
-
-        qr = ctk.CTkFrame(qf, fg_color="transparent")
-        qr.pack(fill="x", padx=15, pady=(0, 12))
-
-        self.run_recipe_var = tk.StringVar()
-        self.run_combo = ctk.CTkComboBox(
-            qr,
-            variable=self.run_recipe_var,
-            fg_color=BG_INPUT,
-            border_color=BORDER_COLOR,
-            button_color=BG_CARD,
-            dropdown_fg_color=BG_INPUT,
-            text_color=TEXT_PRIMARY,
-            font=ctk.CTkFont(*F_BODY),
-            width=360,
-        )
-        self.run_combo.pack(side="left", padx=(0, 12))
-
-        ctk.CTkButton(
-            qr,
-            text="⚡  CARGAR Y EJECUTAR",
-            command=self._run_selected_recipe,
-            fg_color=ACCENT_BLUE,
-            hover_color="#4080CC",
-            text_color=TEXT_PRIMARY,
-            height=46,
-            width=230,
-            font=ctk.CTkFont(*F_BODY_B),
-        ).pack(side="left")
-
-    def _metric(self, parent, label, var, color, col):
-        c = ctk.CTkFrame(parent, fg_color=BG_CARD, corner_radius=10)
-        c.grid(row=0, column=col, padx=5, pady=8, sticky="nsew")
-
-        ctk.CTkLabel(
-            c,
-            text=label,
-            font=ctk.CTkFont(*F_SMALL),
-            text_color=TEXT_SECONDARY,
-        ).pack(pady=(12, 3))
-
-        ctk.CTkLabel(
-            c,
-            textvariable=var,
-            font=ctk.CTkFont("Consolas", 26, "bold"),
-            text_color=color,
-        ).pack(pady=(0, 12))
-
-    def _ctrl_btn(self, parent, text, color, hover, tc, cmd, col):
-        ctk.CTkButton(
-            parent,
-            text=text,
-            command=cmd,
-            fg_color=color,
-            hover_color=hover,
-            text_color=tc,
-            height=80,
-            width=190,
-            font=ctk.CTkFont("Consolas", 18, "bold"),
-            corner_radius=10,
-        ).grid(row=0, column=col, padx=10, pady=10)
+        self.jog_left_single = self.control_tab.jog_left_single
+        self.jog_left_btn = self.control_tab.jog_left_btn
+        self.jog_right_btn = self.control_tab.jog_right_btn
+        self.jog_right_single = self.control_tab.jog_right_single
+        self.jog_status = self.control_tab.jog_status
+        self.jog_paso_actual = self.control_tab.jog_paso_actual
+        self.jog_pos_label = self.control_tab.jog_pos_label
+        self.jog_paso_entry = self.control_tab.jog_paso_entry
+        self.jog_paso_btns = self.control_tab.jog_paso_btns
+        self.jog_paso_var = self.control_tab.jog_paso_var
 
     # ── TAB RECETAS ───────────────────────────────────────────
     def _build_recipes_tab(self):
@@ -1088,54 +621,15 @@ class App(ctk.CTk):
 
     # ── TAB MONITOR ───────────────────────────────────────────
     def _build_monitor_tab(self):
-        tab = self.tabview.tab("  MONITOR  ")
-        tab.columnconfigure(0, weight=1)
-        tab.rowconfigure(1, weight=1)
-
-        hdr = ctk.CTkFrame(tab, fg_color="transparent")
-        hdr.grid(row=0, column=0, sticky="ew", padx=15, pady=(15, 5))
-
-        ctk.CTkLabel(
-            hdr,
-            text="MONITOR EN TIEMPO REAL",
-            font=ctk.CTkFont(*F_TITLE),
-            text_color=TEXT_PRIMARY,
-        ).pack(side="left")
-
-        ctk.CTkButton(
-            hdr,
-            text="🗑 LIMPIAR",
-            command=self._clear_monitor,
-            fg_color=BG_CARD,
-            hover_color=BG_INPUT,
-            border_color=BORDER_COLOR,
-            border_width=1,
-            text_color=TEXT_SECONDARY,
-            height=40,
-            width=130,
-            font=ctk.CTkFont(*F_BODY),
-        ).pack(side="right")
-
-        self.monitor_box = ctk.CTkTextbox(
-            tab,
-            fg_color=BG_CARD,
-            text_color=ACCENT_GREEN,
-            font=ctk.CTkFont("Consolas", 14),
-            border_color=BORDER_COLOR,
-            border_width=1,
-            state="disabled",
+        self.monitor_tab = MonitorTab(
+            self.tabview,
+            on_clear=self._clear_monitor,
         )
-        self.monitor_box.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 15))
+        self.monitor_tab.build()
 
-        tb = self.monitor_box._textbox
-        tb.tag_config("error", foreground=ACCENT_RED)
-        tb.tag_config("pause", foreground=ACCENT_YELLOW)
-        tb.tag_config("ok", foreground=ACCENT_GREEN)
-        tb.tag_config("info", foreground=ACCENT_BLUE)
-        tb.tag_config("barrera", foreground=ACCENT_PURPLE)
-        tb.tag_config("manual", foreground=ACCENT_ORANGE)
-        tb.tag_config("normal", foreground=TEXT_PRIMARY)
-    
+        # Referencia puente para compatibilidad temporal
+        self.monitor_box = self.monitor_tab.monitor_box
+
     # ── Modo Manual ───────────────────────────────────────────
     def _cmd_manual_toggle(self):
         if not self.connected:
@@ -1191,16 +685,20 @@ class App(ctk.CTk):
             )
 
     def _sync_manual_btn(self, es_manual: bool):
-        if es_manual and not self._manual_activo:
-            self._manual_activo = True
+        self._manual_activo = es_manual
+
+        if hasattr(self, "control_tab") and self.control_tab:
+            self.control_tab.set_manual_mode_active(es_manual)
+            return
+
+        if es_manual:
             self.btn_manual.configure(
                 text="⚙  DESACTIVAR MANUAL",
                 fg_color=ACCENT_RED,
                 hover_color="#CC2222",
                 text_color=TEXT_PRIMARY,
             )
-        elif not es_manual and self._manual_activo:
-            self._manual_activo = False
+        else:
             self.btn_manual.configure(
                 text="⚙  ACTIVAR MODO MANUAL",
                 fg_color=ACCENT_ORANGE,
@@ -1210,6 +708,10 @@ class App(ctk.CTk):
 
     # ── JOG ───────────────────────────────────────────────────
     def _set_jog_paso(self, mm: float):
+        if hasattr(self, "control_tab") and self.control_tab:
+            self.control_tab.set_jog_step(mm)
+            return
+
         self.jog_paso_var.set(mm)
         for m, btn in self.jog_paso_btns.items():
             if abs(m - mm) < 0.001:
@@ -1234,18 +736,16 @@ class App(ctk.CTk):
 
     def _set_jog_paso_manual(self):
         try:
-            mm = float(self.jog_paso_entry.get().strip())
+            if hasattr(self, "control_tab") and self.control_tab:
+                mm = float(self.control_tab.get_jog_step_entry_value())
+            else:
+                mm = float(self.jog_paso_entry.get().strip())
+
             if mm <= 0 or mm > 200:
                 raise ValueError("fuera de rango")
 
-            for btn in self.jog_paso_btns.values():
-                btn.configure(
-                    fg_color=BG_CARD,
-                    text_color=TEXT_SECONDARY,
-                )
+            self._set_jog_paso(mm)
 
-            self.jog_paso_var.set(mm)
-            self.jog_paso_actual.configure(text=f"{mm:.2f}mm")
         except ValueError as e:
             messagebox.showerror(
                 "Error",
@@ -1296,6 +796,38 @@ class App(ctk.CTk):
                 )
 
         threading.Thread(target=_t, daemon=True).start()
+
+    def _on_jog_left_press_ui(self):
+        if not self.connected:
+            messagebox.showerror("Error", "No hay conexión")
+            return
+
+        if hasattr(self, "control_tab") and self.control_tab:
+            self.control_tab.set_jog_running("left")
+
+        self._jog_start("left")
+
+    def _on_jog_left_release_ui(self):
+        if hasattr(self, "control_tab") and self.control_tab:
+            self.control_tab.set_jog_stopped()
+
+        self._jog_stop()
+
+    def _on_jog_right_press_ui(self):
+        if not self.connected:
+            messagebox.showerror("Error", "No hay conexión")
+            return
+
+        if hasattr(self, "control_tab") and self.control_tab:
+            self.control_tab.set_jog_running("right")
+
+        self._jog_start("right")
+
+    def _on_jog_right_release_ui(self):
+        if hasattr(self, "control_tab") and self.control_tab:
+            self.control_tab.set_jog_stopped()
+
+        self._jog_stop()
 
     def _jog_start(self, direction: str):
         if not self.connected:
@@ -1663,7 +1195,10 @@ class App(ctk.CTk):
             w.destroy()
 
         names = list_recipes()
-        self.run_combo.configure(values=names)
+        if hasattr(self, "control_tab") and self.control_tab:
+            self.control_tab.set_run_recipes(names)
+        else:
+            self.run_combo.configure(values=names)
 
         if hasattr(self, "pos_recipe_combo"):
             self.pos_recipe_combo.configure(values=names)
@@ -1696,7 +1231,10 @@ class App(ctk.CTk):
         self.recipe_detail.insert("1.0", detail)
         self.recipe_detail.configure(state="disabled")
 
-        self.run_recipe_var.set(name)
+        if hasattr(self, "control_tab") and self.control_tab:
+            self.control_tab.set_selected_run_recipe(name)
+        else:
+            self.run_recipe_var.set(name)
 
     def _recipe_summary(self, recipe):
         lines = [
@@ -1938,14 +1476,21 @@ class App(ctk.CTk):
         txt = f"[{ts}] {msg}\n"
 
         def _ins():
-            self.monitor_box.configure(state="normal")
-            self.monitor_box._textbox.insert("end", txt, tag)
-            self.monitor_box._textbox.see("end")
-            self.monitor_box.configure(state="disabled")
+            if hasattr(self, "monitor_tab") and self.monitor_tab:
+                self.monitor_tab.append(txt, tag)
+            else:
+                self.monitor_box.configure(state="normal")
+                self.monitor_box._textbox.insert("end", txt, tag)
+                self.monitor_box._textbox.see("end")
+                self.monitor_box.configure(state="disabled")
 
         self.after(0, _ins)
 
     def _clear_monitor(self):
+        if hasattr(self, "monitor_tab") and self.monitor_tab:
+            self.monitor_tab.clear()
+            return
+
         self.monitor_box.configure(state="normal")
         self.monitor_box.delete("1.0", "end")
         self.monitor_box.configure(state="disabled")
@@ -2033,6 +1578,10 @@ class App(ctk.CTk):
             )
 
     def _show_alert(self, text, color=ACCENT_YELLOW):
+        if hasattr(self, "control_tab") and self.control_tab:
+            self.control_tab.set_alert(text, color)
+            return
+
         self.alert_label.configure(
             text=text,
             text_color=color,
@@ -2063,11 +1612,17 @@ class App(ctk.CTk):
         upd(self.esp_pos, "POS", lambda v: f"{v}cm")
 
         pos_val = d.get("POS", "")
-        if pos_val and hasattr(self, "jog_pos_label"):
-            self.after(
-                0,
-                lambda v=pos_val: self.jog_pos_label.configure(text=f"Pos: {v}cm"),
-            )
+        if pos_val:
+            if hasattr(self, "control_tab") and self.control_tab:
+                self.after(
+                    0,
+                    lambda v=pos_val: self.control_tab.set_jog_position(f"Pos: {v}cm"),
+                )
+            elif hasattr(self, "jog_pos_label"):
+                self.after(
+                    0,
+                    lambda v=pos_val: self.jog_pos_label.configure(text=f"Pos: {v}cm"),
+                )
 
         capa = d.get("CAPA", "--")
         dcapa = d.get("DCAPA", "0")
@@ -2152,12 +1707,15 @@ class App(ctk.CTk):
                 )
 
                 self._manual_activo = False
-                self.btn_manual.configure(
-                    text="⚙  ACTIVAR MODO MANUAL",
-                    fg_color=ACCENT_ORANGE,
-                    hover_color="#CC6633",
-                    text_color=BG_DARK,
-                )
+                if hasattr(self, "control_tab") and self.control_tab:
+                    self.control_tab.set_manual_mode_active(False)
+                else:
+                    self.btn_manual.configure(
+                        text="⚙  ACTIVAR MODO MANUAL",
+                        fg_color=ACCENT_ORANGE,
+                        hover_color="#CC6633",
+                        text_color=BG_DARK,
+                    )
 
         self.after(0, _upd)
 
@@ -2194,686 +1752,3 @@ class App(ctk.CTk):
             text=datetime.now().strftime("%d/%m/%Y  %H:%M:%S")
         )
         self.after(1000, self._update_clock)
-    # ══════════════════════════════════════════════════════════════
-class RecipeForm(ctk.CTkToplevel):
-    def __init__(self, parent, recipe=None, on_save=None):
-        super().__init__(parent)
-        self.title("Editor de Receta — Bobinadora HMI v5.3")
-        self.geometry("1060x820")
-        self.configure(fg_color=BG_DARK)
-        self.grab_set()
-        self.resizable(True, True)
-        self.lift()
-        self.focus_force()
-
-        self.on_save = on_save
-        self.editing = recipe is not None
-        self.sec_layers = [[] for _ in range(8)]
-        self.sec_der = [[] for _ in range(8)]
-        self.sec_frames = [None] * 8
-        self.sec_tipo = [tk.StringVar(value="BOB") for _ in range(8)]
-        self.sec_nombre = [tk.StringVar() for _ in range(8)]
-        self.num_secs = 0
-
-        self._build(recipe)
-
-    def _build(self, recipe):
-        hdr = ctk.CTkFrame(
-            self,
-            fg_color=BG_PANEL,
-            corner_radius=0,
-            height=60,
-        )
-        hdr.pack(fill="x", side="top")
-        hdr.pack_propagate(False)
-
-        ctk.CTkLabel(
-            hdr,
-            text="CREAR RECETA" if not self.editing else "EDITAR RECETA",
-            font=ctk.CTkFont(*F_TITLE),
-            text_color=ACCENT_GREEN,
-        ).pack(side="left", padx=20, pady=10)
-
-        footer = ctk.CTkFrame(
-            self,
-            fg_color=BG_PANEL,
-            corner_radius=0,
-            height=70,
-        )
-        footer.pack(fill="x", side="bottom")
-        footer.pack_propagate(False)
-
-        ctk.CTkButton(
-            footer,
-            text="✓  GUARDAR RECETA",
-            command=self._save,
-            fg_color=ACCENT_GREEN,
-            hover_color="#00CC6A",
-            text_color=BG_DARK,
-            height=50,
-            width=380,
-            font=ctk.CTkFont("Consolas", 16, "bold"),
-        ).pack(side="left", padx=(20, 8), pady=10)
-
-        ctk.CTkButton(
-            footer,
-            text="✗  CANCELAR",
-            command=self.destroy,
-            fg_color=ACCENT_RED,
-            hover_color="#CC2222",
-            text_color=TEXT_PRIMARY,
-            height=50,
-            width=220,
-            font=ctk.CTkFont("Consolas", 16, "bold"),
-        ).pack(side="left", pady=10)
-
-        self.scroll = ctk.CTkScrollableFrame(
-            self,
-            fg_color=BG_DARK,
-            corner_radius=0,
-        )
-        self.scroll.pack(fill="both", expand=True, side="top")
-
-        self._build_basic(recipe)
-        self._build_add_section_btn()
-
-        if recipe:
-            for sec in recipe.get("secciones", []):
-                self._add_section(recipe=sec)
-        else:
-            self._add_section()
-
-    def _build_basic(self, recipe):
-        f = ctk.CTkFrame(self.scroll, fg_color=BG_CARD, corner_radius=8)
-        f.pack(fill="x", padx=16, pady=(14, 8))
-
-        ctk.CTkLabel(
-            f,
-            text="DATOS BÁSICOS",
-            font=ctk.CTkFont(*F_HEAD),
-            text_color=TEXT_SECONDARY,
-        ).pack(anchor="w", padx=16, pady=(12, 6))
-
-        row = ctk.CTkFrame(f, fg_color="transparent")
-        row.pack(fill="x", padx=16, pady=(0, 14))
-
-        ctk.CTkLabel(
-            row,
-            text="Nombre:",
-            font=ctk.CTkFont(*F_BODY_B),
-            text_color=TEXT_PRIMARY,
-        ).pack(side="left", padx=(0, 8))
-
-        self.name_entry = ctk.CTkEntry(
-            row,
-            fg_color=BG_INPUT,
-            border_color=BORDER_COLOR,
-            text_color=ACCENT_GREEN,
-            font=ctk.CTkFont(*F_BODY),
-            width=300,
-            placeholder_text="ej: TRAFO_100KVA_AT",
-        )
-        self.name_entry.pack(side="left", padx=(0, 30))
-
-        ctk.CTkLabel(
-            row,
-            text="Espesor alambre (mm):",
-            font=ctk.CTkFont(*F_BODY_B),
-            text_color=TEXT_PRIMARY,
-        ).pack(side="left", padx=(0, 8))
-
-        self.esp_entry = ctk.CTkEntry(
-            row,
-            fg_color=BG_INPUT,
-            border_color=BORDER_COLOR,
-            text_color=ACCENT_GREEN,
-            font=ctk.CTkFont(*F_BODY),
-            width=120,
-            placeholder_text="ej: 1.5",
-        )
-        self.esp_entry.pack(side="left")
-
-        if recipe:
-            self.name_entry.insert(0, recipe.get("nombre", ""))
-            self.esp_entry.insert(0, str(recipe.get("espesorX10", 10) / 10))
-
-    def _build_add_section_btn(self):
-        self.add_sec_btn = ctk.CTkButton(
-            self.scroll,
-            text="＋  AGREGAR NUEVA SECCIÓN",
-            command=self._add_section,
-            fg_color=BG_CARD,
-            hover_color=BG_INPUT,
-            border_color=ACCENT_BLUE,
-            border_width=2,
-            text_color=ACCENT_BLUE,
-            height=48,
-            font=ctk.CTkFont(*F_BODY_B),
-        )
-        self.add_sec_btn.pack(fill="x", padx=16, pady=6)
-
-    def _add_section(self, recipe=None):
-        if self.num_secs >= 8:
-            messagebox.showwarning("Aviso", "Máximo 8 secciones")
-            return
-
-        sec_idx = self.num_secs
-        self.num_secs += 1
-        self.add_sec_btn.pack_forget()
-
-        colors = [
-            ACCENT_BLUE,
-            ACCENT_GREEN,
-            ACCENT_ORANGE,
-            ACCENT_PURPLE,
-            ACCENT_YELLOW,
-            ACCENT_RED,
-            "#00CCFF",
-            "#FF88CC",
-        ]
-        color = colors[sec_idx % len(colors)]
-
-        frame = ctk.CTkFrame(self.scroll, fg_color=BG_CARD, corner_radius=10)
-        frame.pack(fill="x", padx=16, pady=6)
-        self.sec_frames[sec_idx] = frame
-
-        hdr = ctk.CTkFrame(frame, fg_color=BG_INPUT, corner_radius=8)
-        hdr.pack(fill="x", padx=12, pady=(12, 6))
-
-        ctk.CTkLabel(
-            hdr,
-            text=f"  SECCIÓN {sec_idx + 1}",
-            font=ctk.CTkFont(*F_HEAD),
-            text_color=color,
-        ).pack(side="left", padx=10, pady=10)
-
-        ctk.CTkButton(
-            hdr,
-            text="＋ AGREGAR CAPA",
-            command=lambda s=sec_idx: self._add_layer(s),
-            fg_color=ACCENT_GREEN,
-            hover_color="#00CC6A",
-            text_color=BG_DARK,
-            height=38,
-            width=180,
-            font=ctk.CTkFont(*F_BODY_B),
-        ).pack(side="right", padx=10, pady=10)
-
-        tipo_row = ctk.CTkFrame(frame, fg_color="transparent")
-        tipo_row.pack(fill="x", padx=12, pady=4)
-
-        ctk.CTkLabel(
-            tipo_row,
-            text="Tipo:",
-            font=ctk.CTkFont(*F_BODY_B),
-            text_color=TEXT_PRIMARY,
-        ).pack(side="left", padx=(4, 10))
-
-        tipo_var = self.sec_tipo[sec_idx]
-        if recipe:
-            tipo_var.set(recipe.get("tipo", "BOB"))
-
-        bob_btn = ctk.CTkButton(
-            tipo_row,
-            text="⚙  BOBINADO",
-            width=160,
-            height=40,
-            font=ctk.CTkFont(*F_BODY_B),
-            fg_color=ACCENT_BLUE,
-            hover_color="#4080CC",
-            text_color=TEXT_PRIMARY,
-        )
-        bob_btn.pack(side="left", padx=4)
-
-        bar_btn = ctk.CTkButton(
-            tipo_row,
-            text="📄  BARRERA",
-            width=160,
-            height=40,
-            font=ctk.CTkFont(*F_BODY_B),
-            fg_color=BG_INPUT,
-            hover_color="#8060CC",
-            text_color=TEXT_SECONDARY,
-        )
-        bar_btn.pack(side="left", padx=4)
-
-        def _set_bob():
-            tipo_var.set("BOB")
-            bob_btn.configure(
-                fg_color=ACCENT_BLUE,
-                text_color=TEXT_PRIMARY,
-            )
-            bar_btn.configure(
-                fg_color=BG_INPUT,
-                text_color=TEXT_SECONDARY,
-            )
-
-        def _set_bar():
-            tipo_var.set("BAR")
-            bob_btn.configure(
-                fg_color=BG_INPUT,
-                text_color=TEXT_SECONDARY,
-            )
-            bar_btn.configure(
-                fg_color=ACCENT_PURPLE,
-                text_color=TEXT_PRIMARY,
-            )
-
-        bob_btn.configure(command=_set_bob)
-        bar_btn.configure(command=_set_bar)
-
-        if tipo_var.get() == "BAR":
-            _set_bar()
-
-        ctk.CTkLabel(
-            tipo_row,
-            text="  Nombre:",
-            font=ctk.CTkFont(*F_BODY),
-            text_color=TEXT_SECONDARY,
-        ).pack(side="left", padx=(20, 6))
-
-        nom_e = ctk.CTkEntry(
-            tipo_row,
-            textvariable=self.sec_nombre[sec_idx],
-            placeholder_text="ej: Alta Tension",
-            fg_color=BG_INPUT,
-            border_color=BORDER_COLOR,
-            text_color=TEXT_PRIMARY,
-            font=ctk.CTkFont(*F_BODY),
-            width=240,
-        )
-        nom_e.pack(side="left", padx=6)
-
-        if recipe and recipe.get("nombre"):
-            self.sec_nombre[sec_idx].set(recipe["nombre"])
-
-        col_hdr = ctk.CTkFrame(frame, fg_color=BG_INPUT, corner_radius=6)
-        col_hdr.pack(fill="x", padx=12, pady=(8, 2))
-
-        for txt, w in [
-            ("N°", 60),
-            ("VUELTAS ACUMULADAS", 200),
-            ("DIRECCIÓN", 190),
-            ("✕", 60),
-        ]:
-            ctk.CTkLabel(
-                col_hdr,
-                text=txt,
-                width=w,
-                font=ctk.CTkFont(*F_SMALL, "bold"),
-                text_color=TEXT_SECONDARY,
-            ).pack(side="left", padx=8, pady=7)
-
-        rows_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        rows_frame.pack(fill="x", padx=12, pady=(0, 4))
-        frame._rows_frame = rows_frame
-
-        if recipe:
-            capas = recipe.get("capas", [])
-            dirs = recipe.get("dirs", [True] * len(capas))
-            for meta, d in zip(capas, dirs):
-                self._add_layer(sec_idx, meta, d)
-        else:
-            self._add_layer(sec_idx)
-
-        self._build_derivaciones(frame, sec_idx, recipe)
-        self._build_add_section_btn()
-
-    def _add_layer(self, sec_idx, meta=None, direction=None):
-        rows_frame = self.sec_frames[sec_idx]._rows_frame
-        num = len(self.sec_layers[sec_idx]) + 1
-
-        if direction is None:
-            direction = (num % 2 == 1)
-
-        row = LayerRow(
-            rows_frame,
-            num,
-            meta,
-            direction,
-            on_delete=lambda r, s=sec_idx: self._del_layer(s, r),
-        )
-        row.pack(fill="x", pady=2)
-        self.sec_layers[sec_idx].append(row)
-
-    def _del_layer(self, sec_idx, row):
-        self.sec_layers[sec_idx].remove(row)
-        row.destroy()
-        for i, r in enumerate(self.sec_layers[sec_idx]):
-            r.update_num(i + 1)
-
-    def _build_derivaciones(self, parent, sec_idx, recipe=None):
-        f = ctk.CTkFrame(parent, fg_color=BG_INPUT, corner_radius=8)
-        f.pack(fill="x", padx=12, pady=(4, 14))
-
-        hdr = ctk.CTkFrame(f, fg_color="transparent")
-        hdr.pack(fill="x", padx=10, pady=(8, 4))
-
-        ctk.CTkLabel(
-            hdr,
-            text="⚡  DERIVACIONES — paradas con mensaje",
-            font=ctk.CTkFont(*F_BODY_B),
-            text_color=ACCENT_YELLOW,
-        ).pack(side="left")
-
-        ctk.CTkButton(
-            hdr,
-            text="＋ AGREGAR",
-            command=lambda s=sec_idx: self._add_derivacion(s),
-            fg_color=ACCENT_YELLOW,
-            hover_color="#CC9200",
-            text_color=BG_DARK,
-            height=36,
-            width=160,
-            font=ctk.CTkFont(*F_BODY_B),
-        ).pack(side="right")
-
-        der_frame = ctk.CTkFrame(f, fg_color="transparent")
-        der_frame.pack(fill="x", padx=10, pady=(0, 10))
-        f._der_frame = der_frame
-        self.sec_frames[sec_idx]._der_section = f
-
-        if recipe:
-            for d in recipe.get("derivaciones", []):
-                self._add_derivacion(
-                    sec_idx,
-                    d.get("vuelta"),
-                    d.get("etiqueta"),
-                    d.get("mensaje", ""),
-                )
-
-    def _add_derivacion(self, sec_idx, vuelta=None, etiqueta=None, mensaje=None):
-        der_frame = self.sec_frames[sec_idx]._der_section._der_frame
-        row = DerivacionRow(
-            der_frame,
-            vuelta,
-            etiqueta,
-            mensaje,
-            on_delete=lambda r, s=sec_idx: self._del_der(s, r),
-        )
-        row.pack(fill="x", pady=3)
-        self.sec_der[sec_idx].append(row)
-
-    def _del_der(self, sec_idx, row):
-        self.sec_der[sec_idx].remove(row)
-        row.destroy()
-
-    def _save(self):
-        nombre = self.name_entry.get().strip().replace(" ", "_")
-        if not nombre:
-            messagebox.showerror("Error", "El nombre no puede estar vacío")
-            return
-
-        try:
-            esp_mm = float(self.esp_entry.get())
-            esp_x10 = int(round(esp_mm * 10))
-        except ValueError:
-            messagebox.showerror("Error", "Espesor inválido")
-            return
-
-        secciones = []
-        for sec_idx in range(self.num_secs):
-            layers = self.sec_layers[sec_idx]
-            if not layers:
-                continue
-
-            capas, dirs = [], []
-            for row in layers:
-                try:
-                    meta = float(row.get_meta())
-                    if meta <= 0:
-                        raise ValueError
-                except ValueError:
-                    messagebox.showerror(
-                        "Error",
-                        f"S{sec_idx+1} Capa {row.num}: valor inválido",
-                    )
-                    return
-
-                capas.append(meta)
-                dirs.append(row.get_direction())
-
-            for c in range(1, len(capas)):
-                if capas[c] <= capas[c - 1]:
-                    messagebox.showerror(
-                        "Error",
-                        f"S{sec_idx+1}: Capa {c+1} ({capas[c]}) debe ser mayor "
-                        f"que Capa {c} ({capas[c-1]})",
-                    )
-                    return
-
-            ders = []
-            total = capas[-1]
-            for row in self.sec_der[sec_idx]:
-                try:
-                    v = float(row.get_vuelta())
-                    e = row.get_etiqueta()
-                    m = row.get_mensaje()
-
-                    if not e:
-                        raise ValueError("etiqueta vacía")
-                    if v <= 0 or v > total:
-                        raise ValueError(f"vuelta {v} fuera de rango 0–{total}")
-
-                    ders.append({
-                        "vuelta": v,
-                        "etiqueta": e,
-                        "mensaje": m,
-                    })
-                except ValueError as err:
-                    messagebox.showerror(
-                        "Error",
-                        f"S{sec_idx+1}: Derivación inválida — {err}",
-                    )
-                    return
-
-            ders.sort(key=lambda d: d["vuelta"])
-
-            secciones.append({
-                "tipo": self.sec_tipo[sec_idx].get(),
-                "nombre": self.sec_nombre[sec_idx].get(),
-                "capas": capas,
-                "dirs": dirs,
-                "derivaciones": ders,
-            })
-
-        if not secciones:
-            messagebox.showerror("Error", "Agrega al menos una sección")
-            return
-
-        recipe = {
-            "nombre": nombre,
-            "espesorX10": esp_x10,
-            "secciones": secciones,
-        }
-
-        if self.on_save:
-            self.on_save(recipe)
-
-        self.destroy()
-
-
-# ══════════════════════════════════════════════════════════════
-class LayerRow(ctk.CTkFrame):
-    def __init__(self, parent, num, meta=None, direction=True, on_delete=None):
-        super().__init__(parent, fg_color=BG_CARD, corner_radius=6)
-        self.num = num
-        self._direction = direction
-        self.on_delete = on_delete
-        self._build(meta)
-
-    def _build(self, meta):
-        self.num_label = ctk.CTkLabel(
-            self,
-            text=f"{self.num:2d}",
-            width=70,
-            font=ctk.CTkFont("Consolas", 16, "bold"),
-            text_color=ACCENT_BLUE,
-        )
-        self.num_label.pack(side="left", padx=(12, 4), pady=10)
-
-        self.meta_entry = ctk.CTkEntry(
-            self,
-            placeholder_text="ej: 65.0",
-            fg_color=BG_INPUT,
-            border_color=BORDER_COLOR,
-            text_color=ACCENT_GREEN,
-            font=ctk.CTkFont("Consolas", 15),
-            width=180,
-            justify="center",
-        )
-        if meta is not None:
-            self.meta_entry.insert(0, str(meta))
-        self.meta_entry.pack(side="left", padx=10, pady=10)
-
-        self.dir_btn = ctk.CTkButton(
-            self,
-            text=self._dir_text(),
-            command=self._toggle_dir,
-            fg_color=self._dir_color(),
-            hover_color=self._dir_hover(),
-            text_color=BG_DARK if self._direction else TEXT_PRIMARY,
-            width=180,
-            height=44,
-            font=ctk.CTkFont("Consolas", 14, "bold"),
-            corner_radius=8,
-        )
-        self.dir_btn.pack(side="left", padx=10, pady=10)
-
-        ctk.CTkButton(
-            self,
-            text="✕",
-            width=50,
-            height=44,
-            fg_color=BG_INPUT,
-            hover_color=ACCENT_RED,
-            text_color=ACCENT_RED,
-            font=ctk.CTkFont("Consolas", 16, "bold"),
-            command=lambda: self.on_delete(self) if self.on_delete else None,
-        ).pack(side="left", padx=(4, 12), pady=10)
-
-    def _dir_text(self):
-        return "→  HACIA MAX" if self._direction else "←  HACIA MIN"
-
-    def _dir_color(self):
-        return DIR_FWD_COLOR if self._direction else DIR_REV_COLOR
-
-    def _dir_hover(self):
-        return "#00CC6A" if self._direction else "#CC2222"
-
-    def _toggle_dir(self):
-        self._direction = not self._direction
-        self.dir_btn.configure(
-            text=self._dir_text(),
-            fg_color=self._dir_color(),
-            hover_color=self._dir_hover(),
-            text_color=BG_DARK if self._direction else TEXT_PRIMARY,
-        )
-
-    def update_num(self, n):
-        self.num = n
-        self.num_label.configure(text=f"{n:2d}")
-
-    def get_meta(self):
-        return self.meta_entry.get().strip()
-
-    def get_direction(self):
-        return self._direction
-
-
-# ══════════════════════════════════════════════════════════════
-class DerivacionRow(ctk.CTkFrame):
-    def __init__(self, parent, vuelta=None, etiqueta=None, mensaje=None, on_delete=None):
-        super().__init__(parent, fg_color=BG_INPUT, corner_radius=6)
-        self.on_delete = on_delete
-        self._build(vuelta, etiqueta, mensaje)
-
-    def _build(self, vuelta, etiqueta, mensaje):
-        row1 = ctk.CTkFrame(self, fg_color="transparent")
-        row1.pack(fill="x")
-
-        ctk.CTkLabel(
-            row1,
-            text="⚡ Vuelta:",
-            font=ctk.CTkFont(*F_BODY),
-            text_color=ACCENT_YELLOW,
-        ).pack(side="left", padx=(10, 4), pady=6)
-
-        self.vuelta_entry = ctk.CTkEntry(
-            row1,
-            placeholder_text="ej: 15.5",
-            fg_color=BG_CARD,
-            border_color=BORDER_COLOR,
-            text_color=ACCENT_YELLOW,
-            font=ctk.CTkFont("Consolas", 14),
-            width=130,
-            justify="center",
-        )
-        if vuelta is not None:
-            self.vuelta_entry.insert(0, str(vuelta))
-        self.vuelta_entry.pack(side="left", padx=6, pady=6)
-
-        ctk.CTkLabel(
-            row1,
-            text="Etiqueta:",
-            font=ctk.CTkFont(*F_BODY),
-            text_color=TEXT_SECONDARY,
-        ).pack(side="left", padx=(14, 4))
-
-        self.etiq_entry = ctk.CTkEntry(
-            row1,
-            placeholder_text="ej: TAP1",
-            fg_color=BG_CARD,
-            border_color=BORDER_COLOR,
-            text_color=TEXT_PRIMARY,
-            font=ctk.CTkFont("Consolas", 14),
-            width=120,
-            justify="center",
-        )
-        if etiqueta:
-            self.etiq_entry.insert(0, etiqueta)
-        self.etiq_entry.pack(side="left", padx=6, pady=6)
-
-        ctk.CTkButton(
-            row1,
-            text="✕",
-            width=42,
-            height=36,
-            fg_color="transparent",
-            hover_color=ACCENT_RED,
-            text_color=ACCENT_RED,
-            font=ctk.CTkFont("Consolas", 15, "bold"),
-            command=lambda: self.on_delete(self) if self.on_delete else None,
-        ).pack(side="left", padx=(6, 10), pady=6)
-
-        row2 = ctk.CTkFrame(self, fg_color="transparent")
-        row2.pack(fill="x")
-
-        ctk.CTkLabel(
-            row2,
-            text="💬 Mensaje:",
-            font=ctk.CTkFont(*F_SMALL),
-            text_color=TEXT_SECONDARY,
-        ).pack(side="left", padx=(10, 4), pady=(0, 8))
-
-        self.msg_entry = ctk.CTkEntry(
-            row2,
-            placeholder_text="ej: INSERTAR PANTALLA",
-            fg_color=BG_CARD,
-            border_color=BORDER_COLOR,
-            text_color=ACCENT_YELLOW,
-            font=ctk.CTkFont("Consolas", 13),
-            width=440,
-        )
-        if mensaje:
-            self.msg_entry.insert(0, mensaje)
-        self.msg_entry.pack(side="left", padx=6, pady=(0, 8))
-
-    def get_vuelta(self):
-        return self.vuelta_entry.get().strip()
-
-    def get_etiqueta(self):
-        return self.etiq_entry.get().strip()
-
-    def get_mensaje(self):
-        return self.msg_entry.get().strip()

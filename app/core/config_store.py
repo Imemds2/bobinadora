@@ -1,5 +1,5 @@
 import json
-from .paths import CONFIG_FILE
+from app.paths import CONFIG_FILE
 
 
 def cargar_config() -> dict:

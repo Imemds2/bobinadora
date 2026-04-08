@@ -2,6 +2,7 @@ import customtkinter as ctk
 import tkinter as tk
 
 from app.core.theme import (
+    BG_DARK,
     BG_CARD,
     BG_INPUT,
     ACCENT_GREEN,
@@ -24,12 +25,15 @@ class ControlTab:
     def __init__(
         self,
         tabview,
+        metrics,
         on_start=None,
         on_stop=None,
         on_reset=None,
         on_homing=None,
         on_run_recipe=None,
         on_manual_toggle=None,
+        on_set_jog_step=None,
+        on_set_jog_step_manual=None,
         on_jog_left_single=None,
         on_jog_right_single=None,
         on_jog_left_press=None,
@@ -38,6 +42,7 @@ class ControlTab:
         on_jog_right_release=None,
     ):
         self.tabview = tabview
+        self.metrics = metrics
 
         self.on_start = on_start
         self.on_stop = on_stop
@@ -45,6 +50,8 @@ class ControlTab:
         self.on_homing = on_homing
         self.on_run_recipe = on_run_recipe
         self.on_manual_toggle = on_manual_toggle
+        self.on_set_jog_step = on_set_jog_step
+        self.on_set_jog_step_manual = on_set_jog_step_manual
 
         self.on_jog_left_single = on_jog_left_single
         self.on_jog_right_single = on_jog_right_single
@@ -52,6 +59,14 @@ class ControlTab:
         self.on_jog_left_release = on_jog_left_release
         self.on_jog_right_press = on_jog_right_press
         self.on_jog_right_release = on_jog_right_release
+
+        # Variables compartidas desde main/sidebar
+        self.esp_vueltas = self.metrics["esp_vueltas"]
+        self.esp_meta = self.metrics["esp_meta"]
+        self.esp_capa = self.metrics["esp_capa"]
+        self.esp_rpm = self.metrics["esp_rpm"]
+        self.esp_sec = self.metrics["esp_sec"]
+        self.esp_tsec = self.metrics["esp_tsec"]
 
         self.tab = None
         self.alert_frame = None
@@ -72,13 +87,6 @@ class ControlTab:
         self.run_recipe_var = tk.StringVar()
         self.jog_paso_var = tk.DoubleVar(value=1.0)
 
-        self.esp_vueltas = tk.StringVar(value="0.0")
-        self.esp_meta = tk.StringVar(value="--")
-        self.esp_capa = tk.StringVar(value="--")
-        self.esp_rpm = tk.StringVar(value="0")
-        self.esp_sec = tk.StringVar(value="--")
-        self.esp_tsec = tk.StringVar(value="--")
-
     def build(self):
         self.tab = self.tabview.tab("  CONTROL  ")
         self.tab.columnconfigure((0, 1, 2, 3, 4, 5), weight=1)
@@ -96,7 +104,65 @@ class ControlTab:
         self._build_manual_mode()
         self._build_jog_panel()
         self._build_run_recipe()
-    
+
+    def _build_metrics(self):
+        mf = ctk.CTkFrame(self.tab, fg_color="transparent")
+        mf.grid(row=1, column=0, columnspan=6, sticky="ew", padx=20)
+        mf.columnconfigure((0, 1, 2, 3, 4, 5), weight=1)
+
+        self._metric(mf, "VUELTAS", self.esp_vueltas, ACCENT_GREEN, 0)
+        self._metric(mf, "PROX PARADA", self.esp_meta, ACCENT_YELLOW, 1)
+        self._metric(mf, "CAPA", self.esp_capa, ACCENT_ORANGE, 2)
+        self._metric(mf, "RPM", self.esp_rpm, ACCENT_BLUE, 3)
+        self._metric(mf, "SECCIÓN", self.esp_sec, ACCENT_PURPLE, 4)
+        self._metric(mf, "TIPO", self.esp_tsec, ACCENT_ORANGE, 5)
+
+    def _build_alert(self):
+        self.alert_frame = ctk.CTkFrame(
+            self.tab,
+            fg_color=BG_CARD,
+            corner_radius=10,
+            height=60,
+        )
+        self.alert_frame.grid(
+            row=2,
+            column=0,
+            columnspan=6,
+            sticky="ew",
+            padx=20,
+            pady=8,
+        )
+        self.alert_frame.pack_propagate(False)
+
+        self.alert_label = ctk.CTkLabel(
+            self.alert_frame,
+            text="Sistema listo — Conecte el controlador",
+            font=ctk.CTkFont("Consolas", 15, "bold"),
+            text_color=TEXT_SECONDARY,
+        )
+        self.alert_label.pack(expand=True)
+
+    def _build_main_buttons(self):
+        bf = ctk.CTkFrame(self.tab, fg_color="transparent")
+        bf.grid(row=3, column=0, columnspan=6, pady=10)
+
+        self._ctrl_btn(
+            bf, "▶  START", ACCENT_GREEN, "#00CC6A",
+            BG_DARK, self._handle_start, 0
+        )
+        self._ctrl_btn(
+            bf, "■  STOP", ACCENT_RED, "#CC2222",
+            TEXT_PRIMARY, self._handle_stop, 1
+        )
+        self._ctrl_btn(
+            bf, "↺  RESET", ACCENT_YELLOW, "#CC9200",
+            BG_DARK, self._handle_reset, 2
+        )
+        self._ctrl_btn(
+            bf, "⌂  HOMING", ACCENT_BLUE, "#4080CC",
+            TEXT_PRIMARY, self._handle_homing, 3
+        )
+
     def _build_manual_mode(self):
         mf2 = ctk.CTkFrame(self.tab, fg_color=BG_CARD, corner_radius=8)
         mf2.grid(row=4, column=0, columnspan=6, sticky="ew", padx=20, pady=(0, 6))
@@ -114,13 +180,12 @@ class ControlTab:
             command=self._handle_manual_toggle,
             fg_color=ACCENT_ORANGE,
             hover_color="#CC6633",
-            text_color=BG_INPUT,
+            text_color=BG_DARK,
             height=44,
             width=260,
             font=ctk.CTkFont(*F_BODY_B),
         )
         self.btn_manual.pack(side="right", padx=16, pady=10)
-
 
     def _build_jog_panel(self):
         jf = ctk.CTkFrame(self.tab, fg_color=BG_CARD, corner_radius=10)
@@ -167,7 +232,7 @@ class ControlTab:
                 hover_color=BORDER_COLOR,
                 text_color=TEXT_SECONDARY,
                 corner_radius=6,
-                command=lambda m=mm: self.set_jog_step(m),
+                command=lambda m=mm: self._handle_set_jog_step(m),
             )
             btn.pack(side="left", padx=4, pady=8)
             self.jog_paso_btns[mm] = btn
@@ -198,9 +263,9 @@ class ControlTab:
             height=40,
             fg_color=ACCENT_GREEN,
             hover_color="#00CC6A",
-            text_color=BG_INPUT,
+            text_color=BG_DARK,
             font=ctk.CTkFont("Consolas", 14, "bold"),
-            command=self._apply_manual_jog_step_from_entry,
+            command=self._handle_set_jog_step_manual,
         ).pack(side="left", padx=(2, 10), pady=8)
 
         self.set_jog_step(1.0)
@@ -314,64 +379,6 @@ class ControlTab:
             width=130,
             font=ctk.CTkFont(*F_SMALL),
         ).pack(side="right")
-    
-    def _build_metrics(self):
-        mf = ctk.CTkFrame(self.tab, fg_color="transparent")
-        mf.grid(row=1, column=0, columnspan=6, sticky="ew", padx=20)
-        mf.columnconfigure((0, 1, 2, 3, 4, 5), weight=1)
-
-        self._metric(mf, "VUELTAS", self.esp_vueltas, ACCENT_GREEN, 0)
-        self._metric(mf, "PROX PARADA", self.esp_meta, ACCENT_YELLOW, 1)
-        self._metric(mf, "CAPA", self.esp_capa, ACCENT_ORANGE, 2)
-        self._metric(mf, "RPM", self.esp_rpm, ACCENT_BLUE, 3)
-        self._metric(mf, "SECCIÓN", self.esp_sec, ACCENT_PURPLE, 4)
-        self._metric(mf, "TIPO", self.esp_tsec, ACCENT_ORANGE, 5)
-
-    def _build_alert(self):
-        self.alert_frame = ctk.CTkFrame(
-            self.tab,
-            fg_color=BG_CARD,
-            corner_radius=10,
-            height=60,
-        )
-        self.alert_frame.grid(
-            row=2,
-            column=0,
-            columnspan=6,
-            sticky="ew",
-            padx=20,
-            pady=8,
-        )
-        self.alert_frame.pack_propagate(False)
-
-        self.alert_label = ctk.CTkLabel(
-            self.alert_frame,
-            text="Sistema listo — Conecte el controlador",
-            font=ctk.CTkFont("Consolas", 15, "bold"),
-            text_color=TEXT_SECONDARY,
-        )
-        self.alert_label.pack(expand=True)
-
-    def _build_main_buttons(self):
-        bf = ctk.CTkFrame(self.tab, fg_color="transparent")
-        bf.grid(row=3, column=0, columnspan=6, pady=10)
-
-        self._ctrl_btn(
-            bf, "▶  START", ACCENT_GREEN, "#00CC6A",
-            BG_INPUT, self._handle_start, 0
-        )
-        self._ctrl_btn(
-            bf, "■  STOP", ACCENT_RED, "#CC2222",
-            TEXT_PRIMARY, self._handle_stop, 1
-        )
-        self._ctrl_btn(
-            bf, "↺  RESET", ACCENT_YELLOW, "#CC9200",
-            BG_INPUT, self._handle_reset, 2
-        )
-        self._ctrl_btn(
-            bf, "⌂  HOMING", ACCENT_BLUE, "#4080CC",
-            TEXT_PRIMARY, self._handle_homing, 3
-        )
 
     def _build_run_recipe(self):
         qf = ctk.CTkFrame(self.tab, fg_color=BG_CARD, corner_radius=8)
@@ -444,11 +451,13 @@ class ControlTab:
             corner_radius=10,
         ).grid(row=0, column=col, padx=10, pady=10)
 
+    def set_alert(self, text, color=TEXT_SECONDARY):
+        self.alert_label.configure(text=text, text_color=color)
 
     def set_manual_mode_active(self, active: bool):
         if active:
             self.btn_manual.configure(
-                text="⚙  DESACTIVAR MODO MANUAL",
+                text="⚙  DESACTIVAR MANUAL",
                 fg_color=ACCENT_RED,
                 hover_color="#CC2222",
                 text_color=TEXT_PRIMARY,
@@ -458,8 +467,17 @@ class ControlTab:
                 text="⚙  ACTIVAR MODO MANUAL",
                 fg_color=ACCENT_ORANGE,
                 hover_color="#CC6633",
-                text_color=BG_INPUT,
+                text_color=BG_DARK,
             )
+
+    def set_run_recipes(self, values):
+        self.run_combo.configure(values=values)
+
+    def set_selected_run_recipe(self, value):
+        self.run_recipe_var.set(value)
+
+    def get_selected_run_recipe(self):
+        return self.run_recipe_var.get()
 
     def set_jog_step(self, mm: float):
         self.jog_paso_var.set(mm)
@@ -468,7 +486,7 @@ class ControlTab:
             if abs(m - mm) < 0.001:
                 btn.configure(
                     fg_color=ACCENT_YELLOW,
-                    text_color=BG_INPUT,
+                    text_color=BG_DARK,
                 )
             else:
                 btn.configure(
@@ -491,17 +509,6 @@ class ControlTab:
     def get_jog_step_entry_value(self) -> str:
         return self.jog_paso_entry.get().strip()
 
-    def _apply_manual_jog_step_from_entry(self):
-        try:
-            mm = float(self.jog_paso_entry.get().strip())
-            if mm <= 0 or mm > 200:
-                raise ValueError("fuera de rango")
-            self.set_jog_step(mm)
-        except ValueError:
-            # Aquí no abrimos messagebox todavía para no meter lógica de negocio/UI modal.
-            # Eso lo puede validar el main si quieres endurecerlo después.
-            pass
-
     def set_jog_position(self, text: str):
         self.jog_pos_label.configure(text=text)
 
@@ -512,7 +519,7 @@ class ControlTab:
         if direction == "left":
             self.jog_left_btn.configure(
                 fg_color=ACCENT_BLUE,
-                text_color=BG_INPUT,
+                text_color=BG_DARK,
             )
             self.jog_right_btn.configure(
                 fg_color="#1C3A5C",
@@ -525,7 +532,7 @@ class ControlTab:
         else:
             self.jog_right_btn.configure(
                 fg_color=ACCENT_BLUE,
-                text_color=BG_INPUT,
+                text_color=BG_DARK,
             )
             self.jog_left_btn.configure(
                 fg_color="#1C3A5C",
@@ -568,39 +575,27 @@ class ControlTab:
         if self.on_run_recipe:
             self.on_run_recipe()
 
-    def set_alert(self, text, color=TEXT_SECONDARY):
-        self.alert_label.configure(text=text, text_color=color)
-
-    def set_run_recipes(self, values):
-        self.run_combo.configure(values=values)
-
-    def set_selected_run_recipe(self, value):
-        self.run_recipe_var.set(value)
-
-    def get_selected_run_recipe(self):
-        return self.run_recipe_var.get()
-
-    def set_vueltas(self, value):
-        self.esp_vueltas.set(value)
-
-    def set_meta(self, value):
-        self.esp_meta.set(value)
-
-    def set_capa(self, value):
-        self.esp_capa.set(value)
-
-    def set_rpm(self, value):
-        self.esp_rpm.set(value)
-
-    def set_seccion(self, value):
-        self.esp_sec.set(value)
-
-    def set_tipo(self, value):
-        self.esp_tsec.set(value)
-
     def _handle_manual_toggle(self):
         if self.on_manual_toggle:
             self.on_manual_toggle()
+
+    def _handle_set_jog_step(self, mm):
+        if self.on_set_jog_step:
+            self.on_set_jog_step(mm)
+        else:
+            self.set_jog_step(mm)
+
+    def _handle_set_jog_step_manual(self):
+        if self.on_set_jog_step_manual:
+            self.on_set_jog_step_manual()
+        else:
+            try:
+                mm = float(self.jog_paso_entry.get().strip())
+                if mm <= 0 or mm > 200:
+                    raise ValueError("fuera de rango")
+                self.set_jog_step(mm)
+            except ValueError:
+                pass
 
     def _handle_jog_left_single(self):
         if self.on_jog_left_single:
@@ -611,21 +606,17 @@ class ControlTab:
             self.on_jog_right_single()
 
     def _handle_jog_left_press(self):
-        self.set_jog_running("left")
         if self.on_jog_left_press:
             self.on_jog_left_press()
 
     def _handle_jog_left_release(self):
-        self.set_jog_stopped()
         if self.on_jog_left_release:
             self.on_jog_left_release()
 
     def _handle_jog_right_press(self):
-        self.set_jog_running("right")
         if self.on_jog_right_press:
             self.on_jog_right_press()
 
     def _handle_jog_right_release(self):
-        self.set_jog_stopped()
         if self.on_jog_right_release:
             self.on_jog_right_release()
