@@ -9,6 +9,7 @@ from app.ui.panels.monitor_tab import MonitorTab
 from app.ui.panels.control_tab import ControlTab
 from app.ui.panels.position_tab import PositionTab
 from app.ui.panels.config_tab import ConfigTab
+from app.ui.panels.recipes_tab import RecipesTab
 
 from app.serial_manager import SerialManager
 from app.recipe_manager import (
@@ -225,110 +226,18 @@ class App(ctk.CTk):
 
     # ── TAB RECETAS ───────────────────────────────────────────
     def _build_recipes_tab(self):
-        tab = self.tabview.tab("  RECETAS  ")
-        tab.columnconfigure(0, weight=1)
-        tab.columnconfigure(1, weight=2)
-        tab.rowconfigure(1, weight=1)
-
-        ctk.CTkLabel(
-            tab,
-            text="GESTIÓN DE RECETAS",
-            font=ctk.CTkFont(*F_TITLE),
-            text_color=TEXT_PRIMARY,
-        ).grid(row=0, column=0, columnspan=2, pady=(15, 10))
-
-        left = ctk.CTkFrame(tab, fg_color=BG_CARD, corner_radius=8)
-        left.grid(row=1, column=0, sticky="nsew", padx=(15, 5), pady=(0, 15))
-        left.columnconfigure(0, weight=1)
-        left.rowconfigure(1, weight=1)
-
-        ctk.CTkLabel(
-            left,
-            text="RECETAS LOCALES (JSON)",
-            font=ctk.CTkFont(*F_HEAD),
-            text_color=TEXT_SECONDARY,
-        ).grid(row=0, column=0, pady=(14, 6), padx=15, sticky="w")
-
-        self.recipe_list_frame = ctk.CTkScrollableFrame(
-            left,
-            fg_color="transparent",
+        self.recipes_tab = RecipesTab(
+            self.tabview,
+            on_new_recipe=self._open_recipe_form,
+            on_delete_recipe=self._delete_selected_recipe,
+            on_send_to_controller=self._send_selected_to_esp,
+            on_edit_recipe=self._edit_selected_recipe,
         )
-        self.recipe_list_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
-        self.recipe_list_frame.columnconfigure(0, weight=1)
+        self.recipes_tab.build()
 
-        br = ctk.CTkFrame(left, fg_color="transparent")
-        br.grid(row=2, column=0, pady=10, padx=10, sticky="ew")
-
-        ctk.CTkButton(
-            br,
-            text="+ NUEVA",
-            command=self._open_recipe_form,
-            fg_color=ACCENT_GREEN,
-            hover_color="#00CC6A",
-            text_color=BG_DARK,
-            height=46,
-            font=ctk.CTkFont(*F_BODY_B),
-        ).pack(side="left", expand=True, fill="x", padx=3)
-
-        ctk.CTkButton(
-            br,
-            text="🗑 BORRAR",
-            command=self._delete_selected_recipe,
-            fg_color=ACCENT_RED,
-            hover_color="#CC2222",
-            text_color=TEXT_PRIMARY,
-            height=46,
-            font=ctk.CTkFont(*F_BODY_B),
-        ).pack(side="left", expand=True, fill="x", padx=3)
-
-        right = ctk.CTkFrame(tab, fg_color=BG_CARD, corner_radius=8)
-        right.grid(row=1, column=1, sticky="nsew", padx=(5, 15), pady=(0, 15))
-        right.columnconfigure(0, weight=1)
-        right.rowconfigure(1, weight=1)
-
-        ctk.CTkLabel(
-            right,
-            text="DETALLE DE RECETA",
-            font=ctk.CTkFont(*F_HEAD),
-            text_color=TEXT_SECONDARY,
-        ).pack(pady=(14, 6), padx=15, anchor="w")
-
-        self.recipe_detail = ctk.CTkTextbox(
-            right,
-            fg_color=BG_INPUT,
-            text_color=ACCENT_GREEN,
-            font=ctk.CTkFont(*F_BODY),
-            border_color=BORDER_COLOR,
-            border_width=1,
-            state="disabled",
-        )
-        self.recipe_detail.pack(fill="both", expand=True, padx=10, pady=(0, 5))
-
-        br2 = ctk.CTkFrame(right, fg_color="transparent")
-        br2.pack(pady=(0, 12), padx=10, fill="x")
-
-        ctk.CTkButton(
-            br2,
-            text="📤 ENVIAR AL CONTROLADOR",
-            command=self._send_selected_to_esp,
-            fg_color=ACCENT_BLUE,
-            hover_color="#4080CC",
-            text_color=TEXT_PRIMARY,
-            height=46,
-            font=ctk.CTkFont(*F_BODY_B),
-        ).pack(side="left", expand=True, fill="x", padx=3)
-
-        ctk.CTkButton(
-            br2,
-            text="✏ EDITAR",
-            command=self._edit_selected_recipe,
-            fg_color=ACCENT_YELLOW,
-            hover_color="#CC9200",
-            text_color=BG_DARK,
-            height=46,
-            font=ctk.CTkFont(*F_BODY_B),
-        ).pack(side="left", expand=True, fill="x", padx=3)
-
+        # Referencias puente para mantener compatibilidad temporal
+        self.recipe_list_frame = self.recipes_tab.recipe_list_frame
+        self.recipe_detail = self.recipes_tab.recipe_detail
     # ── TAB POSICIÓN ──────────────────────────────────────────
     def _build_position_tab(self):
         self.position_tab = PositionTab(
@@ -992,10 +901,13 @@ class App(ctk.CTk):
         self.current_recipe = recipe
         detail = self._recipe_summary(recipe)
 
-        self.recipe_detail.configure(state="normal")
-        self.recipe_detail.delete("1.0", "end")
-        self.recipe_detail.insert("1.0", detail)
-        self.recipe_detail.configure(state="disabled")
+        if hasattr(self, "recipes_tab") and self.recipes_tab:
+            self.recipes_tab.set_recipe_detail(detail)
+        else:
+            self.recipe_detail.configure(state="normal")
+            self.recipe_detail.delete("1.0", "end")
+            self.recipe_detail.insert("1.0", detail)
+            self.recipe_detail.configure(state="disabled")
 
         if hasattr(self, "control_tab") and self.control_tab:
             self.control_tab.set_selected_run_recipe(name)
@@ -1059,9 +971,12 @@ class App(ctk.CTk):
         self.selected_recipe_name = None
         self.current_recipe = None
 
-        self.recipe_detail.configure(state="normal")
-        self.recipe_detail.delete("1.0", "end")
-        self.recipe_detail.configure(state="disabled")
+        if hasattr(self, "recipes_tab") and self.recipes_tab:
+            self.recipes_tab.clear_recipe_detail()
+        else:
+            self.recipe_detail.configure(state="normal")
+            self.recipe_detail.delete("1.0", "end")
+            self.recipe_detail.configure(state="disabled")
 
         self._load_recipe_list()
         self.log(f"Receta '{name}' eliminada", "ok")
