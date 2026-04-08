@@ -38,8 +38,6 @@ from app.core.theme import (
     F_BODY_B,
     F_BIG,
     F_SMALL,
-    DIR_FWD_COLOR,
-    DIR_REV_COLOR,
     setup_theme,
 )
 from app.core.constants import ESTADOS
@@ -147,25 +145,6 @@ class App(ctk.CTk):
         self.esp_pos = self.sidebar_panel.esp_pos
         self.esp_freno = self.sidebar_panel.esp_freno
         self.esp_variador = self.sidebar_panel.esp_variador
-
-    def _ind(self, parent, label, var, color):
-        f = ctk.CTkFrame(parent, fg_color=BG_CARD, corner_radius=6)
-        f.pack(padx=15, pady=2, fill="x")
-
-        ctk.CTkLabel(
-            f,
-            text=label,
-            font=ctk.CTkFont(*F_SMALL),
-            text_color=TEXT_SECONDARY,
-            width=80,
-        ).pack(side="left", padx=8, pady=5)
-
-        ctk.CTkLabel(
-            f,
-            textvariable=var,
-            font=ctk.CTkFont("Consolas", 13, "bold"),
-            text_color=color,
-        ).pack(side="right", padx=8)
 
     def _build_tabs(self, parent):
         self.tabview = ctk.CTkTabview(
@@ -1663,7 +1642,13 @@ class App(ctk.CTk):
 
         rec_name = d.get("REC", "")
         if rec_name and rec_name != "ninguna":
-            self.after(0, lambda n=rec_name: self.run_recipe_var.set(n))
+            if hasattr(self, "control_tab") and self.control_tab:
+                self.after(
+                    0,
+                    lambda n=rec_name: self.control_tab.set_selected_run_recipe(n)
+                )
+            else:
+                self.after(0, lambda n=rec_name: self.run_recipe_var.set(n))
 
     def on_connection_change(self, connected, info):
         self.connected = connected
