@@ -8,6 +8,7 @@ from app.ui.panels.sidebar_panel import SidebarPanel
 from app.ui.panels.monitor_tab import MonitorTab
 from app.ui.panels.control_tab import ControlTab
 from app.ui.panels.position_tab import PositionTab
+from app.ui.panels.config_tab import ConfigTab
 
 from app.serial_manager import SerialManager
 from app.recipe_manager import (
@@ -351,101 +352,16 @@ class App(ctk.CTk):
         self.pos_summary = self.position_tab.pos_summary
     # ── TAB CONFIGURACIÓN ─────────────────────────────────────
     def _build_config_tab(self):
-        tab = self.tabview.tab("  CONFIGURACIÓN  ")
-        tab.columnconfigure(0, weight=1)
+        self.config_tab = ConfigTab(
+            self.tabview,
+            cfg=self.cfg,
+            on_save_local=self._guardar_config_local,
+            on_send_config=self._enviar_config_esp,
+        )
+        self.config_tab.build()
 
-        ctk.CTkLabel(
-            tab,
-            text="CONFIGURACIÓN DEL SISTEMA",
-            font=ctk.CTkFont(*F_TITLE),
-            text_color=TEXT_PRIMARY,
-        ).pack(pady=(20, 10))
-
-        card = ctk.CTkFrame(tab, fg_color=BG_CARD, corner_radius=10)
-        card.pack(fill="x", padx=40, pady=10)
-
-        params = [
-            ("Espesor del alambre (mm)", "espesor_mm", "1.0", "0.1 – 25.0", "float"),
-            ("Retardo freno (segundos)", "retardo_freno", "1.5", "0.0 – 10.0", "float"),
-            ("Lógica freno  (1=NO, 0=NC)", "freno_no", "1", "0 o 1", "bool"),
-            ("Dirección inicial  (1=→, 0=←)", "dir_inicial", "1", "0 o 1", "bool"),
-            ("Vueltas prefreno", "vueltas_prefreno", "5", "1 – 50", "int"),
-        ]
-
-        self.cfg_entries = {}
-        for label, key, default, hint, tipo in params:
-            row = ctk.CTkFrame(card, fg_color="transparent")
-            row.pack(fill="x", padx=20, pady=8)
-
-            ctk.CTkLabel(
-                row,
-                text=label,
-                font=ctk.CTkFont(*F_BODY),
-                text_color=TEXT_PRIMARY,
-                width=320,
-                anchor="w",
-            ).pack(side="left")
-
-            val = str(self.cfg.get(key, default))
-            entry = ctk.CTkEntry(
-                row,
-                fg_color=BG_INPUT,
-                border_color=BORDER_COLOR,
-                text_color=ACCENT_GREEN,
-                font=ctk.CTkFont(*F_BODY),
-                width=160,
-                justify="center",
-            )
-            entry.insert(0, val)
-            entry.pack(side="left", padx=10)
-
-            self.cfg_entries[key] = (entry, tipo)
-
-            ctk.CTkLabel(
-                row,
-                text=hint,
-                font=ctk.CTkFont(*F_SMALL),
-                text_color=TEXT_SECONDARY,
-            ).pack(side="left", padx=10)
-
-        br = ctk.CTkFrame(card, fg_color="transparent")
-        br.pack(pady=16, padx=20, fill="x")
-
-        ctk.CTkButton(
-            br,
-            text="💾  GUARDAR EN PC",
-            command=self._guardar_config_local,
-            fg_color=BG_INPUT,
-            hover_color=BORDER_COLOR,
-            border_color=BORDER_COLOR,
-            border_width=1,
-            text_color=TEXT_PRIMARY,
-            height=46,
-            font=ctk.CTkFont(*F_BODY_B),
-        ).pack(side="left", expand=True, fill="x", padx=(0, 8))
-
-        ctk.CTkButton(
-            br,
-            text="📤  GUARDAR Y ENVIAR AL CONTROLADOR",
-            command=self._enviar_config_esp,
-            fg_color=ACCENT_GREEN,
-            hover_color="#00CC6A",
-            text_color=BG_DARK,
-            height=46,
-            font=ctk.CTkFont(*F_BODY_B),
-        ).pack(side="left", expand=True, fill="x")
-
-        ctk.CTkLabel(
-            card,
-            text=(
-                "Los parámetros se guardan en bobinadora_config.json y se envían "
-                "al controlador automáticamente al conectar."
-            ),
-            font=ctk.CTkFont(*F_SMALL),
-            text_color=TEXT_SECONDARY,
-            wraplength=700,
-        ).pack(pady=(0, 16))
-
+        # Referencia puente para mantener compatibilidad temporal
+        self.cfg_entries = self.config_tab.cfg_entries
     # ── TAB MONITOR ───────────────────────────────────────────
     def _build_monitor_tab(self):
         self.monitor_tab = MonitorTab(
