@@ -14,6 +14,7 @@ from app.controllers.machine.machine_factory import create_machine_controller
 from app.state.app_state import AppState
 from app.controllers.control_controller import ControlController, ControlUiHooks
 from app.services.status_service import StatusService
+from app.services.recipe_service import RecipeService
 
 from app.serial_manager import SerialManager
 from app.recipe_manager import (
@@ -70,6 +71,7 @@ class App(ctk.CTk):
         self.app_state = AppState()
         self.control_controller = None
         self.status_service = StatusService()
+        self.recipe_service = RecipeService()
 
         self.connected            = False
         self.current_recipe       = None
@@ -766,7 +768,7 @@ class App(ctk.CTk):
         for w in self.recipe_list_frame.winfo_children():
             w.destroy()
 
-        names = list_recipes()
+        names = self.recipe_service.get_recipe_names(list_recipes())
         if hasattr(self, "control_tab") and self.control_tab:
             self.control_tab.set_run_recipes(names)
         else:
@@ -792,77 +794,42 @@ class App(ctk.CTk):
             ).pack(fill="x", pady=2)
 
     def _select_recipe(self, name):
-        self.selected_recipe_name = name
         recipe = load_recipe(name)
-        if not recipe:
+        selected = self.recipe_service.build_selected_recipe_data(name, recipe)
+        if not selected:
             return
 
-        self.current_recipe = recipe
-        detail = self._recipe_summary(recipe)
+        self.selected_recipe_name = selected.name
+        self.current_recipe = selected.recipe
 
         if hasattr(self, "recipes_tab") and self.recipes_tab:
-            self.recipes_tab.set_recipe_detail(detail)
+            self.recipes_tab.set_recipe_detail(selected.detail_text)
         else:
             self.recipe_detail.configure(state="normal")
             self.recipe_detail.delete("1.0", "end")
-            self.recipe_detail.insert("1.0", detail)
+            self.recipe_detail.insert("1.0", selected.detail_text)
             self.recipe_detail.configure(state="disabled")
 
+        run_name = self.recipe_service.get_recipe_run_name(selected.recipe)
         if hasattr(self, "control_tab") and self.control_tab:
-            self.control_tab.set_selected_run_recipe(name)
+            self.control_tab.set_selected_run_recipe(run_name)
         else:
-            self.run_recipe_var.set(name)
+            self.run_recipe_var.set(run_name)
 
     def _recipe_summary(self, recipe):
-        lines = [
-            f"NOMBRE   : {recipe['nombre']}",
-            f"ESPESOR  : {recipe.get('espesorX10', 10) / 10:.1f} mm",
-            f"SECCIONES: {len(recipe.get('secciones', []))}",
-            "",
-        ]
-
-        for i, sec in enumerate(recipe.get("secciones", [])):
-            tipo = sec.get("tipo", "BOB")
-            nom = sec.get("nombre", "")
-            ic = "⚙" if tipo == "BOB" else "📄"
-            lines.append(f"{ic} S{i+1}: {nom} [{tipo}]")
-
-            capas = sec.get("capas", [])
-            dirs = sec.get("dirs", [True] * len(capas))
-            ant = 0
-
-            for c, (meta, d) in enumerate(zip(capas, dirs)):
-                v = round(meta - ant, 1)
-                ds = "→MAX" if d else "←MIN"
-                lines.append(
-                    f"  Capa {c+1:2d}: {v:6.1f}v "
-                    f"(acum:{meta:7.1f})  {ds}"
-                )
-                ant = meta
-
-            for der in sec.get("derivaciones", []):
-                m = der.get("mensaje", "")
-                lines.append(
-                    f"    ⚡ [{der['etiqueta']}] @{der['vuelta']}v"
-                    + (f" → {m}" if m else "")
-                )
-
-            lines.append("")
-
-        return "\n".join(lines)
+        return self.recipe_service.build_recipe_summary(recipe)
 
     def _delete_selected_recipe(self):
-        name = self.selected_recipe_name
-        if not name:
-            messagebox.showwarning(
-                "Aviso",
-                "Selecciona una receta primero",
-            )
+        ok, message = self.recipe_service.can_delete_recipe(self.selected_recipe_name)
+        if not ok:
+            messagebox.showwarning("Aviso", message)
             return
+
+        name = self.selected_recipe_name
 
         if not messagebox.askyesno(
             "Confirmar",
-            f"¿Eliminar '{name}' del sistema local?"
+            self.recipe_service.build_delete_confirmation_message(name),
         ):
             return
 
