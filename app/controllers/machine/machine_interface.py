@@ -71,6 +71,11 @@ class MachineInterface(ABC):
     def jog_right(self) -> bool:
         """Inicia movimiento manual hacia la derecha."""
         raise NotImplementedError
+    
+    @abstractmethod
+    def jog_step(self, direction: str, distance_mm: float) -> bool:
+        """Realiza un desplazamiento puntual en modo manual."""
+        raise NotImplementedError
 
     @abstractmethod
     def stop_jog(self) -> bool:

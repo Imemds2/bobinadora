@@ -229,6 +229,34 @@ class SimulatedMachineController(MachineInterface):
         self.snapshot.jog_active = True
         self.snapshot.direction = MachineDirections.RIGHT
         return True
+    
+    def jog_step(self, direction: str, distance_mm: float) -> bool:
+        if not self.snapshot.connected:
+            return False
+
+        if self.snapshot.state not in (MachineStates.IDLE, MachineStates.PAUSED):
+            return False
+
+        if not self.snapshot.manual_mode:
+            return False
+
+        if distance_mm <= 0:
+            return False
+
+        direction = direction.lower().strip()
+
+        if direction == "left":
+            self.snapshot.position_mm = max(0.0, self.snapshot.position_mm - distance_mm)
+            self.snapshot.direction = MachineDirections.LEFT
+        elif direction == "right":
+            self.snapshot.position_mm += distance_mm
+            self.snapshot.direction = MachineDirections.RIGHT
+        else:
+            return False
+
+        self.snapshot.rpm = 0.0
+        self.snapshot.jog_active = False
+        return True
 
     def stop_jog(self) -> bool:
         if not self.snapshot.connected:

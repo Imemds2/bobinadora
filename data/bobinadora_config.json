@@ -6,5 +6,6 @@
   "vueltas_prefreno": 5,
   "puerto": "COM6",
   "baudrate": 115200,
-  "tema": "dark"
+  "tema": "dark",
+  "machine_backend": "simulated"
 }

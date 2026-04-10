@@ -10,7 +10,7 @@ from app.ui.panels.control_tab import ControlTab
 from app.ui.panels.position_tab import PositionTab
 from app.ui.panels.config_tab import ConfigTab
 from app.ui.panels.recipes_tab import RecipesTab
-from app.controllers.machine.simulated_machine_controller import SimulatedMachineController
+from app.controllers.machine.machine_factory import create_machine_controller
 
 from app.serial_manager import SerialManager
 from app.recipe_manager import (
@@ -61,8 +61,9 @@ class App(ctk.CTk):
 
         self.cfg = cargar_config()
 
-        self.use_simulator = True
-        self.machine = SimulatedMachineController()
+        backend = str(self.cfg.get("machine_backend", "simulated")).strip().lower()
+        self.use_simulator = backend == "simulated"
+        self.machine = create_machine_controller(self.cfg)
 
         self.connected            = False
         self.current_recipe       = None
@@ -562,7 +563,6 @@ class App(ctk.CTk):
 
         mm = self.jog_paso_var.get()
         pasos = self._mm_a_pasos_jog(mm)
-        cmd = f"JOGMM:{direction.upper()}:{pasos}"
         lbl = (f"{mm:.1f}".rstrip("0").rstrip(".") or "0") + "mm"
         sym = "◀" if direction == "left" else "▶"
 
@@ -570,6 +570,46 @@ class App(ctk.CTk):
             text=f"{sym} {lbl}",
             text_color=ACCENT_YELLOW,
         )
+
+        if self.use_simulator:
+            ok = self.machine.jog_step(direction, mm)
+
+            if ok:
+                self.log(
+                    f"JOG(sim) {direction} {lbl} ({pasos}p) → OK",
+                    "info",
+                )
+                self.after(
+                    150,
+                    lambda: self.jog_status.configure(
+                        text="◉ PARADO",
+                        text_color=TEXT_SECONDARY,
+                    )
+                )
+            else:
+                self.log(
+                    f"JOG(sim) {direction} {lbl} ({pasos}p) rechazado",
+                    "error",
+                )
+                self.jog_status.configure(
+                    text="✗ RECHAZADO",
+                    text_color=ACCENT_RED,
+                )
+                messagebox.showwarning(
+                    "JOG",
+                    "El simulador no aceptó el pulso.\n"
+                    "Verifica que el modo manual esté activo y la máquina esté en reposo."
+                )
+                self.after(
+                    500,
+                    lambda: self.jog_status.configure(
+                        text="◉ PARADO",
+                        text_color=TEXT_SECONDARY,
+                    )
+                )
+            return
+
+        cmd = f"JOGMM:{direction.upper()}:{pasos}"
 
         def _t():
             resp = self.serial.send(cmd)
@@ -715,6 +755,7 @@ class App(ctk.CTk):
     # ── Configuración ─────────────────────────────────────────
     def _leer_cfg_entries(self) -> dict:
         cfg = dict(self.cfg)
+
         for key, (entry, tipo) in self.cfg_entries.items():
             try:
                 v = entry.get().strip()
@@ -726,6 +767,11 @@ class App(ctk.CTk):
                     cfg[key] = v in ("1", "true", "True")
             except ValueError:
                 pass
+
+        if hasattr(self, "config_tab") and self.config_tab and self.config_tab.backend_var:
+            backend_label = self.config_tab.backend_var.get().strip().lower()
+            cfg["machine_backend"] = "serial" if backend_label == "serial" else "simulated"
+
         return cfg
 
     def _guardar_config_local(self):

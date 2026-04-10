@@ -31,6 +31,8 @@ class ConfigTab:
 
         self.tab = None
         self.cfg_entries = {}
+        self.backend_var = None
+        self.backend_combo = None
 
     def build(self):
         self.tab = self.tabview.tab("  CONFIGURACIÓN  ")
@@ -90,6 +92,49 @@ class ConfigTab:
                 font=ctk.CTkFont(*F_SMALL),
                 text_color=TEXT_SECONDARY,
             ).pack(side="left", padx=10)
+
+        backend_row = ctk.CTkFrame(card, fg_color="transparent")
+        backend_row.pack(fill="x", padx=20, pady=8)
+
+        ctk.CTkLabel(
+            backend_row,
+            text="Backend de máquina",
+            font=ctk.CTkFont(*F_BODY),
+            text_color=TEXT_PRIMARY,
+            width=320,
+            anchor="w",
+        ).pack(side="left")
+
+        backend_value = str(self.cfg.get("machine_backend", "simulated")).strip().lower()
+        backend_label = "Serial" if backend_value == "serial" else "Simulado"
+
+        self.backend_var = ctk.StringVar(value=backend_label)
+
+        self.backend_combo = ctk.CTkComboBox(
+            backend_row,
+            values=["Simulado", "Serial"],
+            variable=self.backend_var,
+            state="readonly",
+            fg_color=BG_INPUT,
+            border_color=BORDER_COLOR,
+            button_color=BG_INPUT,
+            button_hover_color=BORDER_COLOR,
+            text_color=ACCENT_GREEN,
+            dropdown_fg_color=BG_CARD,
+            dropdown_hover_color=BG_INPUT,
+            dropdown_text_color=TEXT_PRIMARY,
+            font=ctk.CTkFont(*F_BODY),
+            width=160,
+            justify="center",
+        )
+        self.backend_combo.pack(side="left", padx=10)
+
+        ctk.CTkLabel(
+            backend_row,
+            text="Simulado o controlador real",
+            font=ctk.CTkFont(*F_SMALL),
+            text_color=TEXT_SECONDARY,
+        ).pack(side="left", padx=10)
 
         br = ctk.CTkFrame(card, fg_color="transparent")
         br.pack(pady=16, padx=20, fill="x")
