@@ -869,52 +869,25 @@ class App(ctk.CTk):
         ).start()
 
     def _send_recipe_thread(self, recipe):
-        nombre = recipe["nombre"]
+        nombre = self.recipe_service.get_recipe_display_name(recipe)
         self.log(f"── Enviando '{nombre}' ──", "info")
 
         self.serial.send("STATUSPAUSE")
         time.sleep(0.1)
 
-        r = self.serial.send(f"NEW:{nombre}")
-        self.log(f"  NEW: {r}")
+        commands = self.recipe_service.build_recipe_upload_commands(recipe)
 
-        r = self.serial.send(f"ESP:{recipe.get('espesorX10', 10)}")
-        self.log(f"  ESP: {r}")
+        last_response = None
+        for label, command in commands:
+            response = self.serial.send(command)
+            self.log(f"  {label}: {response}")
+            last_response = response
 
-        for i, sec in enumerate(recipe.get("secciones", [])):
-            tipo = sec.get("tipo", "BOB")
-            r = self.serial.send(f"S{i+1}:TIPO:{tipo}")
-            self.log(f"  S{i+1} TIPO: {r}")
-
-            nom = sec.get("nombre", "")
-            if nom:
-                r = self.serial.send(f"S{i+1}:NOMBRE:{nom}")
-                self.log(f"  S{i+1} NOMBRE: {r}")
-
-            capas_str = ",".join(str(c) for c in sec["capas"])
-            r = self.serial.send(f"S{i+1}:C:{capas_str}")
-            self.log(f"  S{i+1} CAPAS: {r}")
-
-            if "dirs" in sec:
-                dirs_str = "".join(">" if d else "<" for d in sec["dirs"])
-                r = self.serial.send(f"S{i+1}:DIR:{dirs_str}")
-                self.log(f"  S{i+1} DIR: {r}")
-
-            if sec.get("derivaciones"):
-                der_str = ",".join(
-                    f"{d['vuelta']}:{d['etiqueta']}:{d.get('mensaje', '')}"
-                    for d in sec["derivaciones"]
-                )
-                r = self.serial.send(f"S{i+1}:D:{der_str}")
-                self.log(f"  S{i+1} DER: {r}")
-
-        r = self.serial.send("END")
-        self.log(f"  END: {r}")
         self.serial.send("STATUSRESUME")
 
-        if r and any("ERR" in x for x in r):
+        if last_response and any("ERR" in x for x in last_response):
             self.log(
-                f"✗ El controlador rechazó la receta: {r}",
+                f"✗ El controlador rechazó la receta: {last_response}",
                 "error",
             )
         else:
@@ -941,7 +914,7 @@ class App(ctk.CTk):
         if not messagebox.askyesno(
             "Confirmar ejecución",
             f"¿Cargar y ejecutar '{name}'?\n\n"
-            f"Secciones : {len(recipe.get('secciones', []))}\n"
+            f"Secciones : {self.recipe_service.get_section_count(recipe)}\n"
             f"Espesor   : {recipe.get('espesorX10', 10) / 10:.1f}mm\n\n"
             f"El motor arrancará al pisar el PEDAL."
         ):
@@ -952,7 +925,8 @@ class App(ctk.CTk):
             self._send_recipe_thread(recipe)
             time.sleep(0.3)
 
-            resp = self.serial.send(f"RUN:{name}")
+            run_cmd = self.recipe_service.build_run_command(name)
+            resp = self.serial.send(run_cmd)
             self.log(f"RUN '{name}': {resp}", "ok")
 
             if resp and any("ERR" in x for x in resp):
@@ -990,22 +964,17 @@ class App(ctk.CTk):
         RecipeForm(self, recipe, self._on_recipe_saved)
 
     def _on_recipe_saved(self, recipe):
-        ok, motivo = validate_recipe(recipe)
-        if not ok:
-            messagebox.showerror("Error de validación", motivo)
-            return
+        result = self.recipe_service.save_recipe_flow(recipe)
 
-        resultado = save_recipe(recipe)
-        if not resultado:
-            messagebox.showerror(
-                "Error al guardar",
-                "No se pudo guardar la receta.\n\n"
-                "Verifica que existe la carpeta de recetas en data/recetas.",
-            )
+        if not result.ok:
+            if result.error_message.startswith("Error de validación:"):
+                messagebox.showerror("Error de validación", result.error_message.replace("Error de validación: ", "", 1))
+            else:
+                messagebox.showerror("Error al guardar", result.error_message)
             return
 
         self._load_recipe_list()
-        self.log(f"✓ Receta '{recipe['nombre']}' guardada", "ok")
+        self.log(f"✓ Receta '{result.recipe_name}' guardada", "ok")
 
         if self.connected and messagebox.askyesno(
             "Enviar al controlador",

@@ -3,12 +3,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from app.recipe_manager import validate_recipe, save_recipe
+
 
 @dataclass
 class SelectedRecipeData:
     name: str
     recipe: dict[str, Any]
     detail_text: str
+
+
+@dataclass
+class SaveRecipeResult:
+    ok: bool
+    recipe_name: str = ""
+    error_message: str = ""
 
 
 class RecipeService:
@@ -19,6 +28,8 @@ class RecipeService:
     - construir resumen legible de receta
     - helpers simples para listas y valores de UI
     - resolver selección de receta
+    - validar y guardar receta
+    - convertir receta a comandos para el controlador
     """
 
     def build_recipe_summary(self, recipe: dict[str, Any]) -> str:
@@ -100,3 +111,76 @@ class RecipeService:
 
     def build_delete_confirmation_message(self, recipe_name: str) -> str:
         return f"¿Eliminar '{recipe_name}' del sistema local?"
+
+    def save_recipe_flow(self, recipe: dict[str, Any]) -> SaveRecipeResult:
+        ok, motivo = validate_recipe(recipe)
+        if not ok:
+            return SaveRecipeResult(
+                ok=False,
+                error_message=f"Error de validación: {motivo}",
+            )
+
+        resultado = save_recipe(recipe)
+        if not resultado:
+            return SaveRecipeResult(
+                ok=False,
+                error_message=(
+                    "No se pudo guardar la receta.\n\n"
+                    "Verifica que existe la carpeta de recetas en data/recetas."
+                ),
+            )
+
+        recipe_name = self.get_recipe_display_name(recipe)
+        return SaveRecipeResult(
+            ok=True,
+            recipe_name=recipe_name,
+        )
+
+    def build_recipe_upload_commands(self, recipe: dict[str, Any]) -> list[tuple[str, str]]:
+        """
+        Devuelve una lista de pares:
+        - etiqueta legible para logs
+        - comando serial a enviar
+        """
+        commands: list[tuple[str, str]] = []
+
+        recipe_name = self.get_recipe_display_name(recipe)
+        commands.append(("NEW", f"NEW:{recipe_name}"))
+        commands.append(("ESP", f"ESP:{recipe.get('espesorX10', 10)}"))
+
+        for i, sec in enumerate(recipe.get("secciones", []), start=1):
+            section_prefix = f"S{i}"
+            tipo = sec.get("tipo", "BOB")
+            commands.append((f"{section_prefix} TIPO", f"{section_prefix}:TIPO:{tipo}"))
+
+            nombre = str(sec.get("nombre", "")).strip()
+            if nombre:
+                commands.append((f"{section_prefix} NOMBRE", f"{section_prefix}:NOMBRE:{nombre}"))
+
+            capas = sec.get("capas", [])
+            capas_str = ",".join(str(c) for c in capas)
+            commands.append((f"{section_prefix} CAPAS", f"{section_prefix}:C:{capas_str}"))
+
+            if "dirs" in sec:
+                dirs = sec.get("dirs", [])
+                dirs_str = "".join(">" if d else "<" for d in dirs)
+                commands.append((f"{section_prefix} DIR", f"{section_prefix}:DIR:{dirs_str}"))
+
+            derivaciones = sec.get("derivaciones", [])
+            if derivaciones:
+                der_str = ",".join(
+                    f"{d['vuelta']}:{d['etiqueta']}:{d.get('mensaje', '')}"
+                    for d in derivaciones
+                )
+                commands.append((f"{section_prefix} DER", f"{section_prefix}:D:{der_str}"))
+
+        commands.append(("END", "END"))
+        return commands
+
+    def build_run_command(self, recipe_name: str) -> str:
+        clean_name = str(recipe_name).strip()
+        return f"RUN:{clean_name}"
+
+    def build_run_section_command(self, recipe_name: str, section_index: int) -> str:
+        clean_name = str(recipe_name).strip()
+        return f"RUN:{clean_name}:SEC:{section_index}"
