@@ -26,6 +26,8 @@ class MachineSnapshot:
     target_turns: float = 0.0
     current_layer: int = 0
 
+    position_mm: float = 0.0
+
     rpm: float = 0.0
     direction: str = MachineDirections.STOP
 

@@ -31,6 +31,8 @@ class SimulatedMachineController(MachineInterface):
         self.snapshot.state = MachineStates.DISCONNECTED
         self.snapshot.current_turns = 0.0
         self.snapshot.target_turns = 0.0
+        self.snapshot.current_layer = 0
+        self.snapshot.position_mm = 0.0
         self.snapshot.rpm = 0.0
         self.snapshot.direction = MachineDirections.STOP
         self.snapshot.jog_active = False
@@ -67,20 +69,20 @@ class SimulatedMachineController(MachineInterface):
 
             if self.snapshot.homing_remaining_ms == 0:
                 self.snapshot.state = MachineStates.IDLE
-                self.snapshot.current_turns = 0.0
+                self.snapshot.position_mm = 0.0
                 self.snapshot.rpm = 0.0
                 self.snapshot.direction = MachineDirections.STOP
 
         elif self.snapshot.jog_active:
-            jog_speed = self._turns_per_second * 0.5
-            delta = jog_speed * elapsed
+            jog_speed_mm_per_sec = 5.0
+            delta_mm = jog_speed_mm_per_sec * elapsed
 
             if self.snapshot.direction == MachineDirections.LEFT:
-                self.snapshot.current_turns = max(0.0, self.snapshot.current_turns - delta)
+                self.snapshot.position_mm = max(0.0, self.snapshot.position_mm - delta_mm)
             elif self.snapshot.direction == MachineDirections.RIGHT:
-                self.snapshot.current_turns += delta
+                self.snapshot.position_mm += delta_mm
 
-            self.snapshot.rpm = jog_speed * 60.0
+            self.snapshot.rpm = 0.0
 
         else:
             self.snapshot.rpm = 0.0
@@ -94,7 +96,7 @@ class SimulatedMachineController(MachineInterface):
         if not self.snapshot.connected:
             return False
 
-        if self.snapshot.state in (MachineStates.ERROR, MachineStates.HOMING):
+        if self.snapshot.state != MachineStates.IDLE:
             return False
 
         if target_turns <= 0:
@@ -151,6 +153,39 @@ class SimulatedMachineController(MachineInterface):
         self.snapshot.jog_active = False
         self.snapshot.homing_remaining_ms = 0
         return True
+    
+    def reset(self) -> bool:
+        if not self.snapshot.connected:
+            return False
+
+        if self.snapshot.state == MachineStates.RUNNING:
+            return False
+
+        self.snapshot.current_turns = 0.0
+        self.snapshot.target_turns = 0.0
+        self.snapshot.current_layer = 0
+        self.snapshot.recipe_name = None
+        self.snapshot.rpm = 0.0
+        self.snapshot.direction = MachineDirections.STOP
+        self.snapshot.jog_active = False
+
+        return True
+    
+    def set_manual_mode(self, enabled: bool) -> bool:
+        if not self.snapshot.connected:
+            return False
+
+        if self.snapshot.state in (MachineStates.RUNNING, MachineStates.HOMING, MachineStates.ERROR):
+            return False
+
+        self.snapshot.manual_mode = enabled
+
+        if not enabled:
+            self.snapshot.jog_active = False
+            self.snapshot.rpm = 0.0
+            self.snapshot.direction = MachineDirections.STOP
+
+        return True
 
     def home(self) -> bool:
         if not self.snapshot.connected:
@@ -174,7 +209,9 @@ class SimulatedMachineController(MachineInterface):
         if self.snapshot.state not in (MachineStates.IDLE, MachineStates.PAUSED):
             return False
 
-        self.snapshot.manual_mode = True
+        if not self.snapshot.manual_mode:
+            return False
+
         self.snapshot.jog_active = True
         self.snapshot.direction = MachineDirections.LEFT
         return True
@@ -186,7 +223,9 @@ class SimulatedMachineController(MachineInterface):
         if self.snapshot.state not in (MachineStates.IDLE, MachineStates.PAUSED):
             return False
 
-        self.snapshot.manual_mode = True
+        if not self.snapshot.manual_mode:
+            return False
+
         self.snapshot.jog_active = True
         self.snapshot.direction = MachineDirections.RIGHT
         return True

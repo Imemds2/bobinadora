@@ -10,6 +10,7 @@ from app.ui.panels.control_tab import ControlTab
 from app.ui.panels.position_tab import PositionTab
 from app.ui.panels.config_tab import ConfigTab
 from app.ui.panels.recipes_tab import RecipesTab
+from app.controllers.machine.simulated_machine_controller import SimulatedMachineController
 
 from app.serial_manager import SerialManager
 from app.recipe_manager import (
@@ -60,6 +61,9 @@ class App(ctk.CTk):
 
         self.cfg = cargar_config()
 
+        self.use_simulator = True
+        self.machine = SimulatedMachineController()
+
         self.connected            = False
         self.current_recipe       = None
         self.selected_recipe_name = None
@@ -94,6 +98,97 @@ class App(ctk.CTk):
                 0, lambda o=ok, i=info: self.on_connection_change(o, i)
             ),
         )
+        self.after(100, self._machine_poll)
+
+    def _machine_poll(self):
+        try:
+            if self.use_simulator:
+                self.machine.update()
+                snapshot = self.machine.get_snapshot()
+                self._apply_machine_snapshot(snapshot)
+        finally:
+            self.after(100, self._machine_poll)
+    
+    def _apply_machine_snapshot(self, snapshot):
+        self.connected = snapshot.connected
+
+        self.esp_estado.set(snapshot.state)
+        self.esp_rec.set(snapshot.recipe_name or "--")
+        self.esp_sec.set("--")
+        self.esp_tsec.set("--")
+        self.esp_capa.set(str(snapshot.current_layer) if snapshot.current_layer else "--")
+        self.esp_tcap.set("--")
+        self.esp_meta.set(f"{snapshot.target_turns:.1f}" if snapshot.target_turns else "--")
+        self.esp_vueltas.set(f"{snapshot.current_turns:.1f}")
+        self.esp_rpm.set(f"{snapshot.rpm:.0f}")
+        self.esp_pos.set(f"{snapshot.position_mm / 10.0:.2f}cm")
+
+        self.esp_freno.set("--")
+        self.esp_variador.set("⚡ MOTOR" if snapshot.is_running() else "⏹ parado")
+
+        if hasattr(self, "control_tab") and self.control_tab:
+            self.control_tab.set_jog_position(f"Pos: {snapshot.position_mm / 10.0:.2f}cm")
+
+        self._sync_manual_btn(snapshot.manual_mode)
+
+        if snapshot.connected:
+            self.conn_indicator.configure(
+                text="● SIMULADOR",
+                text_color=ACCENT_GREEN,
+            )
+            self.btn_connect.configure(
+                text="DESCONECTAR",
+                fg_color=ACCENT_RED,
+                hover_color="#CC2222",
+                text_color=TEXT_PRIMARY,
+            )
+        else:
+            self.conn_indicator.configure(
+                text="● DESCONECTADO",
+                text_color=ACCENT_RED,
+            )
+            self.btn_connect.configure(
+                text="CONECTAR",
+                fg_color=ACCENT_GREEN,
+                hover_color="#00CC6A",
+                text_color=BG_DARK,
+            )
+
+        if snapshot.has_error():
+            self._show_alert(
+                snapshot.alarm_message or "Error de simulación",
+                ACCENT_RED,
+            )
+        elif snapshot.state == "HOMING":
+            self._show_alert(
+                "⌂ HOMING en progreso...",
+                ACCENT_ORANGE,
+            )
+        elif snapshot.state == "PAUSED":
+            self._show_alert(
+                "⏸ PAUSADO",
+                ACCENT_YELLOW,
+            )
+        elif snapshot.state == "RUNNING":
+            self._show_alert(
+                "● SIMULANDO BOBINADO",
+                ACCENT_GREEN,
+            )
+        elif snapshot.manual_mode:
+            self._show_alert(
+                "⚙ MODO MANUAL",
+                ACCENT_ORANGE,
+            )
+        elif snapshot.connected:
+            self._show_alert(
+                "Sistema listo — Simulador activo",
+                TEXT_SECONDARY,
+            )
+        else:
+            self._show_alert(
+                "Desconectado — Simulador inactivo",
+                ACCENT_RED,
+            )
 
     # ── UI ────────────────────────────────────────────────────
     def _build_ui(self):
@@ -286,6 +381,58 @@ class App(ctk.CTk):
     def _cmd_manual_toggle(self):
         if not self.connected:
             messagebox.showerror("Error", "No hay conexión")
+            return
+
+        if self.use_simulator:
+            if not self._manual_activo:
+                rec = self.esp_rec.get()
+                if rec not in ("--", "ninguna", ""):
+                    messagebox.showwarning(
+                        "Modo Manual",
+                        "No se puede activar el modo manual\n"
+                        "con una receta cargada.\n\n"
+                        "Detenga la receta primero."
+                    )
+                    return
+
+                if not messagebox.askyesno(
+                    "Activar Modo Manual",
+                    "¿Activar modo manual?\n\n"
+                    "El motor arrancará y parará con el PEDAL.\n"
+                    "El husillo se sincroniza con el encoder.\n\n"
+                    "Solo disponible sin receta cargada."
+                ):
+                    return
+
+                ok = self.machine.set_manual_mode(True)
+                if ok:
+                    self.log("MANUAL ON(sim) → OK", "manual")
+                    self._sync_manual_btn(True)
+                    self._show_alert(
+                        "⚙ MODO MANUAL — Simulador activo",
+                        ACCENT_ORANGE,
+                    )
+                else:
+                    self.log("MANUAL ON(sim) rechazado", "error")
+                    messagebox.showwarning(
+                        "Modo Manual",
+                        "El simulador no aceptó activar modo manual en el estado actual."
+                    )
+            else:
+                ok = self.machine.set_manual_mode(False)
+                if ok:
+                    self.log("MANUAL OFF(sim) → OK", "manual")
+                    self._sync_manual_btn(False)
+                    self._show_alert(
+                        "Sistema listo — Simulador activo",
+                        TEXT_SECONDARY,
+                    )
+                else:
+                    self.log("MANUAL OFF(sim) rechazado", "error")
+                    messagebox.showwarning(
+                        "Modo Manual",
+                        "El simulador no aceptó desactivar modo manual en el estado actual."
+                    )
             return
 
         if not self._manual_activo:
@@ -505,6 +652,33 @@ class App(ctk.CTk):
             text_color=ACCENT_BLUE,
         )
 
+        if self.use_simulator:
+            ok = self.machine.jog_left() if direction == "left" else self.machine.jog_right()
+
+            if not ok:
+                self._jog_active = False
+
+                for btn in [self.jog_left_btn, self.jog_right_btn]:
+                    btn.configure(
+                        fg_color="#1C3A5C",
+                        text_color=ACCENT_BLUE,
+                    )
+
+                self.jog_status.configure(
+                    text="◉ PARADO",
+                    text_color=TEXT_SECONDARY,
+                )
+
+                self.log(f"JOG(sim) {direction} rechazado", "error")
+                messagebox.showwarning(
+                    "JOG",
+                    "El simulador no aceptó el movimiento en el estado actual.\n"
+                    "Verifica que el modo manual esté activo."
+                )
+            else:
+                self.log(f"JOG(sim) {direction} → OK", "info")
+            return
+
         self.serial.send("JOG:LEFT" if direction == "left" else "JOG:RIGHT")
         threading.Thread(target=self._jog_loop, daemon=True).start()
 
@@ -516,6 +690,7 @@ class App(ctk.CTk):
 
     def _jog_stop(self):
         self._jog_active = False
+
         for btn in [self.jog_left_btn, self.jog_right_btn]:
             btn.configure(
                 fg_color="#1C3A5C",
@@ -526,6 +701,15 @@ class App(ctk.CTk):
             text="◉ PARADO",
             text_color=TEXT_SECONDARY,
         )
+
+        if self.use_simulator:
+            ok = self.machine.stop_jog()
+            if ok:
+                self.log("JOG(sim) STOP → OK", "info")
+            else:
+                self.log("JOG(sim) STOP rechazado", "error")
+            return
+
         self.serial.send("JOG:STOP")
 
     # ── Configuración ─────────────────────────────────────────
@@ -829,6 +1013,26 @@ class App(ctk.CTk):
         if not self.connected:
             messagebox.showerror("Error", "No conectado")
             return
+
+        if self.use_simulator:
+            target_turns = 10.0
+            recipe_name = self.run_recipe_var.get().strip() or "RECETA_SIMULADA"
+
+            ok = self.machine.start_job(
+                target_turns=target_turns,
+                recipe_name=recipe_name,
+            )
+
+            if ok:
+                self.log(f"START(sim) → receta={recipe_name}, meta={target_turns}", "ok")
+            else:
+                self.log("START(sim) rechazado", "error")
+                messagebox.showwarning(
+                    "Aviso",
+                    "El simulador no aceptó START en el estado actual.",
+                )
+            return
+
         resp = self.serial.send("STARTMAQ")
         self.log(f"START → {resp}", "ok")
 
@@ -836,6 +1040,19 @@ class App(ctk.CTk):
         if not self.connected:
             messagebox.showerror("Error", "No conectado")
             return
+
+        if self.use_simulator:
+            ok = self.machine.stop()
+            if ok:
+                self.log("STOP(sim) → OK", "error")
+            else:
+                self.log("STOP(sim) rechazado", "error")
+                messagebox.showwarning(
+                    "Aviso",
+                    "El simulador no aceptó STOP en el estado actual.",
+                )
+            return
+
         resp = self.serial.send("STOPMAQ")
         self.log(f"STOP → {resp}", "error")
 
@@ -843,24 +1060,54 @@ class App(ctk.CTk):
         if not self.connected:
             messagebox.showerror("Error", "No conectado")
             return
-        if messagebox.askyesno(
+
+        if not messagebox.askyesno(
             "Confirmar",
             "¿Resetear contador de vueltas?"
         ):
-            resp = self.serial.send("RESET")
-            self.log(f"RESET → {resp}", "ok")
+            return
+
+        if self.use_simulator:
+            ok = self.machine.reset()
+            if ok:
+                self.log("RESET(sim) → OK", "ok")
+            else:
+                self.log("RESET(sim) rechazado", "error")
+                messagebox.showwarning(
+                    "Aviso",
+                    "El simulador no aceptó RESET en el estado actual.",
+                )
+            return
+
+        resp = self.serial.send("RESET")
+        self.log(f"RESET → {resp}", "ok")
 
     def _cmd_homing(self):
         if not self.connected:
             messagebox.showerror("Error", "No conectado")
             return
-        if messagebox.askyesno(
+
+        if not messagebox.askyesno(
             "Confirmar Homing",
             "¿Ejecutar homing?\n"
             "El husillo buscará el punto cero."
         ):
-            resp = self.serial.send("HOMING")
-            self.log(f"HOMING → {resp}", "info")
+            return
+
+        if self.use_simulator:
+            ok = self.machine.home()
+            if ok:
+                self.log("HOMING(sim) → OK", "info")
+            else:
+                self.log("HOMING(sim) rechazado", "error")
+                messagebox.showwarning(
+                    "Aviso",
+                    "El simulador no aceptó HOMING en el estado actual.",
+                )
+            return
+
+        resp = self.serial.send("HOMING")
+        self.log(f"HOMING → {resp}", "info")
 
     # ── Recetas ───────────────────────────────────────────────
     def _load_recipe_list(self):
@@ -1369,13 +1616,14 @@ class App(ctk.CTk):
                 )
                 self.log(f"Conectado a {info}", "ok")
 
-                threading.Thread(
-                    target=lambda: (
-                        time.sleep(1.5),
-                        self._send_config_to_esp(),
-                    ),
-                    daemon=True,
-                ).start()
+                if not self.use_simulator:
+                    threading.Thread(
+                        target=lambda: (
+                            time.sleep(1.5),
+                            self._send_config_to_esp(),
+                        ),
+                        daemon=True,
+                    ).start()
             else:
                 self.conn_indicator.configure(
                     text="● DESCONECTADO",
@@ -1407,6 +1655,18 @@ class App(ctk.CTk):
         self.after(0, _upd)
 
     def _toggle_connect(self):
+        if self.use_simulator:
+            if self.connected:
+                self.machine.disconnect()
+                self.on_connection_change(False, "Simulador")
+            else:
+                ok = self.machine.connect()
+                if ok:
+                    self.on_connection_change(True, "Simulador")
+                else:
+                    self.on_connection_change(False, "No se pudo iniciar el simulador")
+            return
+
         if self.connected:
             self.serial.disconnect()
         else:

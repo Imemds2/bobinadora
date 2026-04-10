@@ -46,6 +46,16 @@ class MachineInterface(ABC):
     def stop(self) -> bool:
         """Detiene el trabajo actual."""
         raise NotImplementedError
+    
+    @abstractmethod
+    def reset(self) -> bool:
+        """Resetea el trabajo/contador en el estado permitido."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def set_manual_mode(self, enabled: bool) -> bool:
+        """Activa o desactiva el modo manual persistente."""
+        raise NotImplementedError
 
     @abstractmethod
     def home(self) -> bool:
