@@ -3,10 +3,12 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable
 
+from app.state.app_state import AppState
 from app.core.theme import (
     ACCENT_BLUE,
+    ACCENT_GREEN,
     ACCENT_ORANGE,
     ACCENT_RED,
     ACCENT_YELLOW,
@@ -14,7 +16,6 @@ from app.core.theme import (
     TEXT_PRIMARY,
     TEXT_SECONDARY,
 )
-from app.state.app_state import AppState
 
 
 @dataclass
@@ -28,25 +29,38 @@ class ControlUiHooks:
     get_loaded_recipe_name: Callable[[], str]
     get_run_recipe_name: Callable[[], str]
     get_jog_step_mm: Callable[[], float]
+    get_selected_port: Callable[[], str]
     mm_to_steps: Callable[[float], int]
+    save_selected_port: Callable[[str], None]
 
     set_manual_mode_active: Callable[[bool], None]
     set_alert: Callable[[str, str], None]
     set_jog_running: Callable[[str], None]
     set_jog_stopped: Callable[[], None]
     set_jog_status: Callable[[str, str], None]
+    set_jog_position: Callable[[str], None]
+
+    set_connection_indicator: Callable[[str, str], None]
+    set_connect_button_state: Callable[[str, str, str, str], None]
+
+    set_machine_state: Callable[[str], None]
+    set_recipe_name: Callable[[str], None]
+    set_section: Callable[[str], None]
+    set_total_sections: Callable[[str], None]
+    set_layer: Callable[[str], None]
+    set_total_layers: Callable[[str], None]
+    set_target_turns: Callable[[str], None]
+    set_current_turns: Callable[[str], None]
+    set_rpm: Callable[[str], None]
+    set_position: Callable[[str], None]
+    set_brake_status: Callable[[str], None]
+    set_motor_status: Callable[[str], None]
 
 
 class ControlController:
     """
-    Orquesta acciones de control de máquina sin depender directamente
-    de widgets concretos de Tk. La UI se inyecta por hooks/callbacks.
-
-    En este primer refactor maneja:
-    - START / STOP / RESET / HOMING
-    - Modo manual
-    - JOG por pulso
-    - JOG continuo
+    Orquesta acciones de control y ciclo de vida de máquina
+    sin depender directamente de widgets concretos de Tk.
     """
 
     def __init__(
@@ -107,6 +121,147 @@ class ControlController:
             "El simulador no aceptó el pulso.\n"
             "Verifica que el modo manual esté activo y la máquina esté en reposo."
         )
+
+    # ---------------------------------------------------------
+    # Conexión / desconexión
+    # ---------------------------------------------------------
+    def toggle_connect(self) -> None:
+        if self.use_simulator:
+            self._toggle_connect_simulator()
+            return
+
+        self._toggle_connect_serial()
+
+    def _toggle_connect_simulator(self) -> None:
+        if self.state.connected:
+            self.machine.disconnect()
+            self.sync_connection(False, "Simulador")
+            return
+
+        ok = self.machine.connect()
+        if ok:
+            self.sync_connection(True, "Simulador")
+        else:
+            self.sync_connection(False, "No se pudo iniciar el simulador")
+
+    def _toggle_connect_serial(self) -> None:
+        if self.state.connected:
+            self.serial.disconnect()
+            return
+
+        port = (self.ui.get_selected_port() or "").strip()
+        if not port:
+            self.ui.show_warning("Aviso", "Selecciona un puerto")
+            return
+
+        self.ui.save_selected_port(port)
+
+        threading.Thread(
+            target=self.serial.connect,
+            args=(port,),
+            daemon=True,
+        ).start()
+
+    def sync_connection(self, connected: bool, info: str | None = None) -> None:
+        self.state.connected = connected
+
+        if not connected:
+            self.state.manual_activo = False
+            self.state.jog_active = False
+            self.ui.set_manual_mode_active(False)
+            self.ui.set_jog_stopped()
+            self.ui.set_jog_status("◉ PARADO", TEXT_SECONDARY)
+
+            self.ui.set_connection_indicator("● DESCONECTADO", ACCENT_RED)
+            self.ui.set_connect_button_state(
+                "CONECTAR",
+                ACCENT_GREEN,
+                "#00CC6A",
+                BG_DARK,
+            )
+            self.ui.set_alert(
+                "Desconectado — Reconecte el controlador"
+                if not self.use_simulator
+                else "Desconectado — Simulador inactivo",
+                ACCENT_RED,
+            )
+            self.ui.log(f"Desconectado: {info or 'sin detalle'}", "error")
+            return
+
+        label = f"● {info}" if info else ("● SIMULADOR" if self.use_simulator else "● CONECTADO")
+        self.ui.set_connection_indicator(label, ACCENT_GREEN)
+        self.ui.set_connect_button_state(
+            "DESCONECTAR",
+            ACCENT_RED,
+            "#CC2222",
+            TEXT_PRIMARY,
+        )
+        self.ui.log(f"Conectado a {info or 'controlador'}", "ok")
+
+    # ---------------------------------------------------------
+    # Polling simulador
+    # ---------------------------------------------------------
+    def poll_machine(self) -> None:
+        if not self.use_simulator:
+            return
+
+        self.machine.update()
+        snapshot = self.machine.get_snapshot()
+        self.apply_machine_snapshot(snapshot)
+
+    def apply_machine_snapshot(self, snapshot) -> None:
+        self.state.connected = snapshot.connected
+
+        self.ui.set_machine_state(snapshot.state)
+        self.ui.set_recipe_name(snapshot.recipe_name or "--")
+        self.ui.set_section("--")
+        self.ui.set_total_sections("--")
+        self.ui.set_layer(str(snapshot.current_layer) if snapshot.current_layer else "--")
+        self.ui.set_total_layers("--")
+        self.ui.set_target_turns(f"{snapshot.target_turns:.1f}" if snapshot.target_turns else "--")
+        self.ui.set_current_turns(f"{snapshot.current_turns:.1f}")
+        self.ui.set_rpm(f"{snapshot.rpm:.0f}")
+        self.ui.set_position(f"{snapshot.position_mm / 10.0:.2f}cm")
+        self.ui.set_brake_status("--")
+        self.ui.set_motor_status("⚡ MOTOR" if snapshot.is_running() else "⏹ parado")
+        self.ui.set_jog_position(f"Pos: {snapshot.position_mm / 10.0:.2f}cm")
+
+        self.sync_manual_from_backend(snapshot.manual_mode)
+
+        if snapshot.connected:
+            self.ui.set_connection_indicator("● SIMULADOR", ACCENT_GREEN)
+            self.ui.set_connect_button_state(
+                "DESCONECTAR",
+                ACCENT_RED,
+                "#CC2222",
+                TEXT_PRIMARY,
+            )
+        else:
+            self.ui.set_connection_indicator("● DESCONECTADO", ACCENT_RED)
+            self.ui.set_connect_button_state(
+                "CONECTAR",
+                ACCENT_GREEN,
+                "#00CC6A",
+                BG_DARK,
+            )
+
+        if snapshot.has_error():
+            self.ui.set_alert(
+                snapshot.alarm_message or "Error de simulación",
+                ACCENT_RED,
+            )
+        elif snapshot.state == "HOMING":
+            self.ui.set_alert("⌂ HOMING en progreso...", ACCENT_ORANGE)
+        elif snapshot.state == "PAUSED":
+            self.ui.set_alert("⏸ PAUSADO", ACCENT_YELLOW)
+        elif snapshot.state == "RUNNING":
+            self.ui.set_alert("● SIMULANDO BOBINADO", ACCENT_GREEN)
+        elif snapshot.manual_mode:
+            self.ui.set_alert("⚙ MODO MANUAL", ACCENT_ORANGE)
+        elif snapshot.connected:
+            self.ui.set_alert("Sistema listo — Simulador activo", TEXT_SECONDARY)
+        else:
+            self.ui.set_alert("Desconectado — Simulador inactivo", ACCENT_RED)
 
     # ---------------------------------------------------------
     # Comandos principales
@@ -425,12 +580,3 @@ class ControlController:
     def sync_manual_from_backend(self, is_manual: bool) -> None:
         self.state.manual_activo = is_manual
         self.ui.set_manual_mode_active(is_manual)
-
-    def sync_connection(self, connected: bool) -> None:
-        self.state.connected = connected
-        if not connected:
-            self.state.manual_activo = False
-            self.state.jog_active = False
-            self.ui.set_manual_mode_active(False)
-            self.ui.set_jog_stopped()
-            self.ui.set_jog_status("◉ PARADO", TEXT_SECONDARY)

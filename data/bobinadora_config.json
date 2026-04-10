@@ -7,5 +7,5 @@
   "puerto": "COM6",
   "baudrate": 115200,
   "tema": "dark",
-  "machine_backend": "simulated"
+  "machine_backend": "serial"
 }

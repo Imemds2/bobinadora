@@ -108,95 +108,10 @@ class App(ctk.CTk):
 
     def _machine_poll(self):
         try:
-            if self.use_simulator:
-                self.machine.update()
-                snapshot = self.machine.get_snapshot()
-                self._apply_machine_snapshot(snapshot)
+            self.control_controller.poll_machine()
         finally:
             self.after(100, self._machine_poll)
     
-    def _apply_machine_snapshot(self, snapshot):
-        self.connected = snapshot.connected
-        self.app_state.connected = snapshot.connected
-
-        self.esp_estado.set(snapshot.state)
-        self.esp_rec.set(snapshot.recipe_name or "--")
-        self.esp_sec.set("--")
-        self.esp_tsec.set("--")
-        self.esp_capa.set(str(snapshot.current_layer) if snapshot.current_layer else "--")
-        self.esp_tcap.set("--")
-        self.esp_meta.set(f"{snapshot.target_turns:.1f}" if snapshot.target_turns else "--")
-        self.esp_vueltas.set(f"{snapshot.current_turns:.1f}")
-        self.esp_rpm.set(f"{snapshot.rpm:.0f}")
-        self.esp_pos.set(f"{snapshot.position_mm / 10.0:.2f}cm")
-
-        self.esp_freno.set("--")
-        self.esp_variador.set("⚡ MOTOR" if snapshot.is_running() else "⏹ parado")
-
-        if hasattr(self, "control_tab") and self.control_tab:
-            self.control_tab.set_jog_position(f"Pos: {snapshot.position_mm / 10.0:.2f}cm")
-
-        self._sync_manual_btn(snapshot.manual_mode)
-
-        if snapshot.connected:
-            self.conn_indicator.configure(
-                text="● SIMULADOR",
-                text_color=ACCENT_GREEN,
-            )
-            self.btn_connect.configure(
-                text="DESCONECTAR",
-                fg_color=ACCENT_RED,
-                hover_color="#CC2222",
-                text_color=TEXT_PRIMARY,
-            )
-        else:
-            self.conn_indicator.configure(
-                text="● DESCONECTADO",
-                text_color=ACCENT_RED,
-            )
-            self.btn_connect.configure(
-                text="CONECTAR",
-                fg_color=ACCENT_GREEN,
-                hover_color="#00CC6A",
-                text_color=BG_DARK,
-            )
-
-        if snapshot.has_error():
-            self._show_alert(
-                snapshot.alarm_message or "Error de simulación",
-                ACCENT_RED,
-            )
-        elif snapshot.state == "HOMING":
-            self._show_alert(
-                "⌂ HOMING en progreso...",
-                ACCENT_ORANGE,
-            )
-        elif snapshot.state == "PAUSED":
-            self._show_alert(
-                "⏸ PAUSADO",
-                ACCENT_YELLOW,
-            )
-        elif snapshot.state == "RUNNING":
-            self._show_alert(
-                "● SIMULANDO BOBINADO",
-                ACCENT_GREEN,
-            )
-        elif snapshot.manual_mode:
-            self._show_alert(
-                "⚙ MODO MANUAL",
-                ACCENT_ORANGE,
-            )
-        elif snapshot.connected:
-            self._show_alert(
-                "Sistema listo — Simulador activo",
-                TEXT_SECONDARY,
-            )
-        else:
-            self._show_alert(
-                "Desconectado — Simulador inactivo",
-                ACCENT_RED,
-            )
-
     # ── UI ────────────────────────────────────────────────────
     def _build_ui(self):
         self._build_header()
@@ -425,13 +340,40 @@ class App(ctk.CTk):
             get_loaded_recipe_name=lambda: self.esp_rec.get(),
             get_run_recipe_name=lambda: self.run_recipe_var.get(),
             get_jog_step_mm=lambda: self.jog_paso_var.get(),
+            get_selected_port=lambda: self.port_var.get(),
             mm_to_steps=self._mm_a_pasos_jog,
+            save_selected_port=self._save_selected_port,
 
             set_manual_mode_active=lambda active: self._sync_manual_btn(active),
             set_alert=lambda text, color=ACCENT_YELLOW: self._show_alert(text, color),
             set_jog_running=lambda direction: self.control_tab.set_jog_running(direction),
             set_jog_stopped=lambda: self.control_tab.set_jog_stopped(),
             set_jog_status=lambda text, color=TEXT_SECONDARY: self.control_tab.set_jog_status(text, color),
+            set_jog_position=lambda text: self.control_tab.set_jog_position(text),
+
+            set_connection_indicator=lambda text, color: self.conn_indicator.configure(
+                text=text,
+                text_color=color,
+            ),
+            set_connect_button_state=lambda text, fg, hover, txt_color: self.btn_connect.configure(
+                text=text,
+                fg_color=fg,
+                hover_color=hover,
+                text_color=txt_color,
+            ),
+
+            set_machine_state=lambda value: self.esp_estado.set(value),
+            set_recipe_name=lambda value: self.esp_rec.set(value),
+            set_section=lambda value: self.esp_sec.set(value),
+            set_total_sections=lambda value: self.esp_tsec.set(value),
+            set_layer=lambda value: self.esp_capa.set(value),
+            set_total_layers=lambda value: self.esp_tcap.set(value),
+            set_target_turns=lambda value: self.esp_meta.set(value),
+            set_current_turns=lambda value: self.esp_vueltas.set(value),
+            set_rpm=lambda value: self.esp_rpm.set(value),
+            set_position=lambda value: self.esp_pos.set(value),
+            set_brake_status=lambda value: self.esp_freno.set(value),
+            set_motor_status=lambda value: self.esp_variador.set(value),
         )
 
         self.control_controller = ControlController(
@@ -1312,89 +1254,19 @@ class App(ctk.CTk):
         self.app_state.connected = connected
 
         if self.control_controller:
-            self.control_controller.sync_connection(connected)
+            self.control_controller.sync_connection(connected, info)
 
-        def _upd():
-            if connected:
-                self.conn_indicator.configure(
-                    text=f"● {info}",
-                    text_color=ACCENT_GREEN,
-                )
-                self.btn_connect.configure(
-                    text="DESCONECTAR",
-                    fg_color=ACCENT_RED,
-                    hover_color="#CC2222",
-                    text_color=TEXT_PRIMARY,
-                )
-                self.log(f"Conectado a {info}", "ok")
-
-                if not self.use_simulator:
-                    threading.Thread(
-                        target=lambda: (
-                            time.sleep(1.5),
-                            self._send_config_to_esp(),
-                        ),
-                        daemon=True,
-                    ).start()
-            else:
-                self.conn_indicator.configure(
-                    text="● DESCONECTADO",
-                    text_color=ACCENT_RED,
-                )
-                self.btn_connect.configure(
-                    text="CONECTAR",
-                    fg_color=ACCENT_GREEN,
-                    hover_color="#00CC6A",
-                    text_color=BG_DARK,
-                )
-                self.log(f"Desconectado: {info}", "error")
-                self._show_alert(
-                    "Desconectado — Reconecte el controlador",
-                    ACCENT_RED,
-                )
-
-                self._manual_activo = False
-                if hasattr(self, "control_tab") and self.control_tab:
-                    self.control_tab.set_manual_mode_active(False)
-                else:
-                    self.btn_manual.configure(
-                        text="⚙  ACTIVAR MODO MANUAL",
-                        fg_color=ACCENT_ORANGE,
-                        hover_color="#CC6633",
-                        text_color=BG_DARK,
-                    )
-
-        self.after(0, _upd)
-
-    def _toggle_connect(self):
-        if self.use_simulator:
-            if self.connected:
-                self.machine.disconnect()
-                self.on_connection_change(False, "Simulador")
-            else:
-                ok = self.machine.connect()
-                if ok:
-                    self.on_connection_change(True, "Simulador")
-                else:
-                    self.on_connection_change(False, "No se pudo iniciar el simulador")
-            return
-
-        if self.connected:
-            self.serial.disconnect()
-        else:
-            port = self.port_var.get()
-            if not port:
-                messagebox.showwarning("Aviso", "Selecciona un puerto")
-                return
-
-            self.cfg["puerto"] = port
-            guardar_config(self.cfg)
-
+        if connected and not self.use_simulator:
             threading.Thread(
-                target=self.serial.connect,
-                args=(port,),
+                target=lambda: (
+                    time.sleep(1.5),
+                    self._send_config_to_esp(),
+                ),
                 daemon=True,
             ).start()
+
+    def _toggle_connect(self):
+        self.control_controller.toggle_connect()
 
     def _refresh_ports(self):
         ports = self.serial.get_ports() if hasattr(self, "serial") else []
@@ -1405,6 +1277,10 @@ class App(ctk.CTk):
             self.port_var.set(saved)
         elif ports:
             self.port_var.set(ports[0])
+
+    def _save_selected_port(self, port: str):
+        self.cfg["puerto"] = port
+        guardar_config(self.cfg)
 
     def _update_clock(self):
         self.clock_label.configure(
