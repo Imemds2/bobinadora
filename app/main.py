@@ -13,6 +13,7 @@ from app.ui.panels.recipes_tab import RecipesTab
 from app.controllers.machine.machine_factory import create_machine_controller
 from app.state.app_state import AppState
 from app.controllers.control_controller import ControlController, ControlUiHooks
+from app.services.status_service import StatusService
 
 from app.serial_manager import SerialManager
 from app.recipe_manager import (
@@ -68,6 +69,7 @@ class App(ctk.CTk):
         self.machine = create_machine_controller(self.cfg)
         self.app_state = AppState()
         self.control_controller = None
+        self.status_service = StatusService()
 
         self.connected            = False
         self.current_recipe       = None
@@ -1074,85 +1076,19 @@ class App(ctk.CTk):
         self.monitor_box.configure(state="disabled")
 
     # ── Callbacks serial ──────────────────────────────────────
+
     def on_serial_message(self, msg):
         if msg.startswith("STATUS:"):
             self._parse_status(msg)
             return
 
-        tag = "normal"
-        if "PAUSA:CAPA" in msg:
-            tag = "pause"
-        elif "PAUSA:DER" in msg:
-            tag = "pause"
-        elif "PAUSA:BARRERA" in msg:
-            tag = "barrera"
-        elif "TERMINADA" in msg:
-            tag = "ok"
-        elif "ERR" in msg:
-            tag = "error"
-        elif "OK" in msg:
-            tag = "ok"
-        elif "SECCION" in msg:
-            tag = "info"
-        elif "MANUAL" in msg:
-            tag = "manual"
+        effect = self.status_service.get_ui_effect(msg)
+        self.log(msg, effect.log_tag)
 
-        self.log(msg, tag)
-
-        if ("PAUSA:DER" in msg or "PAUSA:BARRERA" in msg):
-            parts = msg.split(":")
-            alert = ""
-
-            for i, p in enumerate(parts):
-                if p == "MSG" and i + 1 < len(parts):
-                    alert = parts[i + 1]
-                    break
-
-            if not alert:
-                for i, p in enumerate(parts):
-                    if p in ("DER", "BARRERA") and i + 1 < len(parts):
-                        alert = f"⚡ {parts[i + 1]}"
-                        break
-
+        if effect.alert_text and effect.alert_color:
             self.after(
                 0,
-                lambda a=alert: self._show_alert(a, ACCENT_YELLOW),
-            )
-
-        elif ("PAUSA:CAPA" in msg or "PAUSA:CAPA_BARRERA" in msg):
-            parts = msg.split(":")
-            cn = parts[2] if len(parts) > 2 else "?"
-            self.after(
-                0,
-                lambda c=cn: self._show_alert(
-                    f"FIN CAPA {c} — Presione ▶ START",
-                    ACCENT_YELLOW,
-                )
-            )
-
-        elif "SECCION_FIN" in msg:
-            parts = msg.split(":")
-            nxt = ""
-            for i, p in enumerate(parts):
-                if p == "NEXT_NOMBRE" and i + 1 < len(parts):
-                    nxt = parts[i + 1]
-                    break
-
-            self.after(
-                0,
-                lambda n=nxt: self._show_alert(
-                    f"FIN SECCIÓN → Siguiente: {n} — Presione ▶ START",
-                    ACCENT_BLUE,
-                )
-            )
-
-        elif "BOBINA_TERMINADA" in msg:
-            self.after(
-                0,
-                lambda: self._show_alert(
-                    "✓ BOBINA COMPLETA — Presione ▶ START",
-                    ACCENT_GREEN,
-                )
+                lambda t=effect.alert_text, c=effect.alert_color: self._show_alert(t, c),
             )
 
     def _show_alert(self, text, color=ACCENT_YELLOW):
@@ -1166,88 +1102,60 @@ class App(ctk.CTk):
         )
 
     def _parse_status(self, msg):
-        d = parse_status_msg(msg)
-        if not d:
+        status = self.status_service.parse_status_ui_data(msg)
+        if not status:
             return
 
-        estado_num = d.get("_estado", "0")
-        estado_str = ESTADOS.get(estado_num, f"EST_{estado_num}")
-        self.after(0, lambda s=estado_str: self.esp_estado.set(s))
+        self.after(0, lambda s=status.estado_texto: self.esp_estado.set(s))
 
-        def upd(var, key, fmt=None):
-            val = d.get(key, "")
-            if val:
-                v = fmt(val) if fmt else val
-                self.after(0, lambda x=v, vr=var: vr.set(x))
+        if status.recipe_name:
+            self.after(0, lambda v=status.recipe_name: self.esp_rec.set(v))
+        if status.section:
+            self.after(0, lambda v=status.section: self.esp_sec.set(v))
+        if status.total_sections:
+            self.after(0, lambda v=status.total_sections: self.esp_tsec.set(v))
+        if status.total_layers:
+            self.after(0, lambda v=status.total_layers: self.esp_tcap.set(v))
+        if status.target_turns:
+            self.after(0, lambda v=status.target_turns: self.esp_meta.set(v))
+        if status.current_turns:
+            self.after(0, lambda v=status.current_turns: self.esp_vueltas.set(v))
+        if status.rpm:
+            self.after(0, lambda v=status.rpm: self.esp_rpm.set(v))
+        if status.position_cm:
+            self.after(0, lambda v=status.position_cm: self.esp_pos.set(v))
 
-        upd(self.esp_rec, "REC")
-        upd(self.esp_sec, "SEC")
-        upd(self.esp_tsec, "TSEC")
-        upd(self.esp_tcap, "TCAP")
-        upd(self.esp_meta, "META")
-        upd(self.esp_vueltas, "VT")
-        upd(self.esp_rpm, "RPM")
-        upd(self.esp_pos, "POS", lambda v: f"{v}cm")
+        self.after(0, lambda v=status.layer_display: self.esp_capa.set(v))
+        self.after(0, lambda v=status.brake_text: self.esp_freno.set(v))
+        self.after(0, lambda v=status.motor_text: self.esp_variador.set(v))
+        self.after(0, lambda m=status.is_manual: self._sync_manual_btn(m))
 
-        pos_val = d.get("POS", "")
-        if pos_val:
+        if status.position_label:
             if hasattr(self, "control_tab") and self.control_tab:
                 self.after(
                     0,
-                    lambda v=pos_val: self.control_tab.set_jog_position(f"Pos: {v}cm"),
+                    lambda v=status.position_label: self.control_tab.set_jog_position(v),
                 )
             elif hasattr(self, "jog_pos_label"):
                 self.after(
                     0,
-                    lambda v=pos_val: self.jog_pos_label.configure(text=f"Pos: {v}cm"),
+                    lambda v=status.position_label: self.jog_pos_label.configure(text=v),
                 )
 
-        capa = d.get("CAPA", "--")
-        dcapa = d.get("DCAPA", "0")
-        cdisp = dcapa if dcapa not in ("0", "") else capa
-        self.after(0, lambda v=cdisp: self.esp_capa.set(v))
+        if status.alert_text and status.alert_color:
+            self.after(
+                0,
+                lambda t=status.alert_text, c=status.alert_color: self._show_alert(t, c),
+            )
 
-        freno = d.get("FRENO", "0")
-        var = d.get("VAR", "0")
-        f_txt = "🔒 FRENO" if freno == "1" else "🔓 libre"
-        v_txt = "⚡ MOTOR" if var == "1" else "⏹ parado"
-
-        self.after(0, lambda f=f_txt: self.esp_freno.set(f))
-        self.after(0, lambda v=v_txt: self.esp_variador.set(v))
-
-        es_manual = (estado_num == "13")
-        self.after(0, lambda m=es_manual: self._sync_manual_btn(m))
-
-        alertas = {
-            "0":  ("Sistema listo — Cargue una receta", TEXT_SECONDARY),
-            "1":  ("● BOBINANDO — Pise pedal para parar", ACCENT_GREEN),
-            "2":  ("◐ PREFRENO — Reduciendo velocidad...", ACCENT_YELLOW),
-            "3":  ("⏸ FIN DE CAPA — Presione ▶ START", ACCENT_YELLOW),
-            "4":  ("▶ DESBLOQUEADO — Pise el PEDAL", ACCENT_BLUE),
-            "5":  ("⚡ PAUSA DER — Presione ▶ START", ACCENT_RED),
-            "6":  ("▶ DER DESBLOQUEADA — Pise el PEDAL", ACCENT_BLUE),
-            "7":  ("⏭ FIN SECCIÓN — Presione ▶ START", ACCENT_BLUE),
-            "8":  ("✓ BOBINA COMPLETA — Presione ▶ START", ACCENT_GREEN),
-            "9":  ("🔧 JOG — Mueva el husillo", ACCENT_BLUE),
-            "10": ("📄 BARRERA — Pise el pedal para girar", ACCENT_PURPLE),
-            "11": ("📄 PAUSA BARRERA — Presione ▶ START", ACCENT_PURPLE),
-            "12": ("⌂ HOMING en progreso...", ACCENT_ORANGE),
-            "13": ("⚙ MODO MANUAL — Pise PEDAL para girar", ACCENT_ORANGE),
-        }
-
-        if estado_num in alertas:
-            txt, color = alertas[estado_num]
-            self.after(0, lambda t=txt, c=color: self._show_alert(t, c))
-
-        rec_name = d.get("REC", "")
-        if rec_name and rec_name != "ninguna":
+        if status.recipe_name and status.recipe_name != "ninguna":
             if hasattr(self, "control_tab") and self.control_tab:
                 self.after(
                     0,
-                    lambda n=rec_name: self.control_tab.set_selected_run_recipe(n)
+                    lambda n=status.recipe_name: self.control_tab.set_selected_run_recipe(n)
                 )
             else:
-                self.after(0, lambda n=rec_name: self.run_recipe_var.set(n))
+                self.after(0, lambda n=status.recipe_name: self.run_recipe_var.set(n))
 
     def on_connection_change(self, connected, info):
         self.connected = connected
