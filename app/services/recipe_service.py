@@ -20,6 +20,22 @@ class SaveRecipeResult:
     error_message: str = ""
 
 
+@dataclass
+class SectionPositionData:
+    section_number: int
+    section_name: str
+    section_type: str
+    total_section_turns: float
+    layer_index: int
+    layer_number: int
+    turns_before_layer: float
+    turns_in_layer: float
+    layer_turns: float
+    layer_direction_text: str
+    pulses: int
+    next_derivation_text: str = ""
+
+
 class RecipeService:
     """
     Servicio de apoyo para lógica de recetas que no depende de UI.
@@ -30,6 +46,7 @@ class RecipeService:
     - resolver selección de receta
     - validar y guardar receta
     - convertir receta a comandos para el controlador
+    - calcular datos de posición/reanudación por sección
     """
 
     def build_recipe_summary(self, recipe: dict[str, Any]) -> str:
@@ -184,3 +201,114 @@ class RecipeService:
     def build_run_section_command(self, recipe_name: str, section_index: int) -> str:
         clean_name = str(recipe_name).strip()
         return f"RUN:{clean_name}:SEC:{section_index}"
+
+    # ---------------------------------------------------------
+    # Posición / reanudación
+    # ---------------------------------------------------------
+    def get_section_position_data(
+        self,
+        recipe: dict[str, Any],
+        section_number: int,
+        current_turns: float,
+    ) -> SectionPositionData:
+        secciones = recipe.get("secciones", [])
+        if section_number < 1 or section_number > len(secciones):
+            raise ValueError(f"Sección {section_number} no existe")
+
+        sec = secciones[section_number - 1]
+        section_name = sec.get("nombre", "")
+        section_type = sec.get("tipo", "BOB")
+        capas = sec.get("capas", [])
+
+        if not capas:
+            raise ValueError(f"S{section_number} sin capas")
+
+        total_section_turns = float(capas[-1])
+
+        if current_turns < 0 or current_turns > total_section_turns:
+            raise ValueError(
+                f"Vuelta {current_turns} fuera de rango.\n"
+                f"S{section_number} acepta: 0 – {total_section_turns:.1f}v acumuladas."
+            )
+
+        layer_index = self._find_layer_index(capas, current_turns)
+        layer_number = layer_index + 1
+        turns_before_layer = float(capas[layer_index - 1]) if layer_index > 0 else 0.0
+        turns_in_layer = round(current_turns - turns_before_layer, 1)
+        layer_turns = round(float(capas[layer_index]) - turns_before_layer, 1)
+
+        dirs = sec.get("dirs", [True] * len(capas))
+        direction = dirs[layer_index] if layer_index < len(dirs) else True
+        layer_direction_text = "->" if direction else "<-"
+
+        pulses = int(round(current_turns * 200))
+        next_derivation_text = self._build_next_derivation_text(sec, current_turns)
+
+        return SectionPositionData(
+            section_number=section_number,
+            section_name=section_name,
+            section_type=section_type,
+            total_section_turns=total_section_turns,
+            layer_index=layer_index,
+            layer_number=layer_number,
+            turns_before_layer=turns_before_layer,
+            turns_in_layer=turns_in_layer,
+            layer_turns=layer_turns,
+            layer_direction_text=layer_direction_text,
+            pulses=pulses,
+            next_derivation_text=next_derivation_text,
+        )
+
+    def build_section_info_text(self, recipe: dict[str, Any], section_number: int) -> str:
+        sec = self._get_section(recipe, section_number)
+        return f"{sec.get('nombre', '')}  [{sec.get('tipo', 'BOB')}]"
+
+    def build_layer_info_text(self, position_data: SectionPositionData) -> str:
+        return (
+            f"Capa {position_data.layer_number} "
+            f"({position_data.layer_turns:.0f}v)  "
+            f"{position_data.layer_direction_text}\n"
+            f"Rango: 0 – {position_data.total_section_turns:.0f}v acum."
+        )
+
+    def build_position_summary(
+        self,
+        recipe_name: str,
+        position_data: SectionPositionData,
+    ) -> str:
+        return (
+            f"Receta   : {recipe_name}\n"
+            f"Sección  : {position_data.section_number} — "
+            f"{position_data.section_name} [{position_data.section_type}]\n"
+            f"─────────────────────────────\n"
+            f"Vuelta acum. : {position_data.turns_before_layer + position_data.turns_in_layer:.1f}v "
+            f"(de {position_data.total_section_turns:.1f}v totales)\n"
+            f"Capa detect. : {position_data.layer_number} "
+            f"({position_data.turns_in_layer:.1f}v dentro de capa)\n"
+            f"Encoder      : {position_data.pulses} pulsos"
+            f"{position_data.next_derivation_text}\n"
+            f"─────────────────────────────\n"
+            f"El controlador iniciará en S{position_data.section_number} "
+            f"con encoder={position_data.pulses}."
+        )
+
+    # ---------------------------------------------------------
+    # Helpers privados
+    # ---------------------------------------------------------
+    def _get_section(self, recipe: dict[str, Any], section_number: int) -> dict[str, Any]:
+        secciones = recipe.get("secciones", [])
+        if section_number < 1 or section_number > len(secciones):
+            raise ValueError(f"Sección {section_number} no existe")
+        return secciones[section_number - 1]
+
+    def _find_layer_index(self, capas: list[Any], current_turns: float) -> int:
+        for idx, limit in enumerate(capas):
+            if current_turns <= float(limit):
+                return idx
+        return max(0, len(capas) - 1)
+
+    def _build_next_derivation_text(self, sec: dict[str, Any], current_turns: float) -> str:
+        for der in sec.get("derivaciones", []):
+            if float(der["vuelta"]) > current_turns:
+                return f"\n  Próx. parada : [{der['etiqueta']}] @{der['vuelta']}v"
+        return ""

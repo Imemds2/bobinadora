@@ -4,7 +4,7 @@
   "freno_no": true,
   "dir_inicial": true,
   "vueltas_prefreno": 5,
-  "puerto": "COM6",
+  "puerto": "COM9",
   "baudrate": 115200,
   "tema": "dark",
   "machine_backend": "simulated"

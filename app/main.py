@@ -546,62 +546,32 @@ class App(ctk.CTk):
             return
 
         try:
-            si = int(self.pos_sec_var.get()) - 1
-            sec = rec["secciones"][si]
-            tipo = sec.get("tipo", "BOB")
-            nom = sec.get("nombre", "")
-            capas = sec.get("capas", [])
-
-            if hasattr(self, "position_tab") and self.position_tab:
-                self.position_tab.set_section_info(f"{nom}  [{tipo}]")
-            else:
-                self.pos_sec_info.configure(text=f"{nom}  [{tipo}]")
-
-            if not capas:
-                self.pos_capa_info.configure(text="")
-                return
-
-            total_sec = capas[-1]
-
+            sec_num = int(self.pos_sec_var.get())
             try:
-                v_actual = float(self.pos_vuelta_var.get())
-                if v_actual > total_sec:
-                    self.pos_vuelta_var.set(str(total_sec))
-                    v_actual = total_sec
-                if v_actual < 0:
-                    self.pos_vuelta_var.set("0.0")
-                    v_actual = 0.0
+                current_turns = float(self.pos_vuelta_var.get())
             except ValueError:
                 self.pos_vuelta_var.set("0.0")
-                v_actual = 0.0
+                current_turns = 0.0
 
-            capa_idx = 0
-            for c in range(len(capas)):
-                if v_actual <= capas[c]:
-                    capa_idx = c
-                    break
-                capa_idx = c
-
-            capa_num = capa_idx + 1
-            ant = capas[capa_idx - 1] if capa_idx > 0 else 0.0
-            meta = capas[capa_idx]
-            vueltas_capa = round(meta - ant, 1)
-            d = "->" if sec["dirs"][capa_idx] else "<-"
-
-            if hasattr(self, "position_tab") and self.position_tab:
-                self.position_tab.set_capa(str(capa_num))
-            else:
-                self.pos_capa_var.set(str(capa_num))
-            capa_info_text = (
-                f"Capa {capa_num} ({vueltas_capa:.0f}v)  {d}\n"
-                f"Rango: 0 – {total_sec:.0f}v acum."
+            position_data = self.recipe_service.get_section_position_data(
+                rec,
+                sec_num,
+                current_turns,
             )
-            if hasattr(self, "position_tab") and self.position_tab:
-                self.position_tab.set_capa_info(capa_info_text)
-            else:
-                self.pos_capa_info.configure(text=capa_info_text)
 
-        except (IndexError, ValueError):
+            section_info_text = self.recipe_service.build_section_info_text(rec, sec_num)
+            layer_info_text = self.recipe_service.build_layer_info_text(position_data)
+
+            if hasattr(self, "position_tab") and self.position_tab:
+                self.position_tab.set_section_info(section_info_text)
+                self.position_tab.set_capa(str(position_data.layer_number))
+                self.position_tab.set_capa_info(layer_info_text)
+            else:
+                self.pos_sec_info.configure(text=section_info_text)
+                self.pos_capa_var.set(str(position_data.layer_number))
+                self.pos_capa_info.configure(text=layer_info_text)
+
+        except ValueError:
             if hasattr(self, "position_tab") and self.position_tab:
                 self.position_tab.set_capa_info("")
             else:
@@ -641,7 +611,7 @@ class App(ctk.CTk):
 
         try:
             sec_num = int(self.pos_sec_var.get())
-            vuelta_acum = float(self.pos_vuelta_var.get())
+            current_turns = float(self.pos_vuelta_var.get())
         except ValueError:
             messagebox.showerror("Error", "Valores inválidos")
             return
@@ -651,61 +621,19 @@ class App(ctk.CTk):
             messagebox.showerror("Error", f"'{rec_name}' no encontrada")
             return
 
-        secciones = recipe.get("secciones", [])
-        if sec_num < 1 or sec_num > len(secciones):
-            messagebox.showerror("Error", f"Sección {sec_num} no existe")
-            return
-
-        sec = secciones[sec_num - 1]
-        sec_tipo = sec.get("tipo", "BOB")
-        capas = sec.get("capas", [])
-
-        if not capas:
-            messagebox.showerror("Error", f"S{sec_num} sin capas")
-            return
-
-        total_sec = capas[-1]
-
-        if vuelta_acum < 0 or vuelta_acum > total_sec:
-            messagebox.showerror(
-                "Error",
-                f"Vuelta {vuelta_acum} fuera de rango.\n"
-                f"S{sec_num} acepta: 0 – {total_sec:.1f}v acumuladas."
+        try:
+            position_data = self.recipe_service.get_section_position_data(
+                recipe,
+                sec_num,
+                current_turns,
             )
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
             return
 
-        capa_idx = 0
-        for c in range(len(capas)):
-            if vuelta_acum <= capas[c]:
-                capa_idx = c
-                break
-            capa_idx = c
-
-        capa_num = capa_idx + 1
-        ant = capas[capa_idx - 1] if capa_idx > 0 else 0.0
-        vuelta_en_capa = round(vuelta_acum - ant, 1)
-
-        prox_der = ""
-        for der in sec.get("derivaciones", []):
-            if der["vuelta"] > vuelta_acum:
-                prox_der = (
-                    f"\n  Próx. parada : "
-                    f"[{der['etiqueta']}] @{der['vuelta']}v"
-                )
-                break
-
-        pulsos = int(round(vuelta_acum * 200))
-
-        resumen = (
-            f"Receta   : {rec_name}\n"
-            f"Sección  : {sec_num} — {sec.get('nombre', '')} [{sec_tipo}]\n"
-            f"─────────────────────────────\n"
-            f"Vuelta acum. : {vuelta_acum:.1f}v (de {total_sec:.1f}v totales)\n"
-            f"Capa detect. : {capa_num}/{len(capas)} ({vuelta_en_capa:.1f}v dentro de capa)\n"
-            f"Encoder      : {pulsos} pulsos"
-            f"{prox_der}\n"
-            f"─────────────────────────────\n"
-            f"El controlador iniciará en S{sec_num} con encoder={pulsos}."
+        resumen = self.recipe_service.build_position_summary(
+            rec_name,
+            position_data,
         )
 
         if not messagebox.askyesno("Confirmar inicio", resumen):
@@ -713,17 +641,17 @@ class App(ctk.CTk):
 
         def _thread():
             self.log(
-                f"=== REANUDANDO S{sec_num} V_acum={vuelta_acum} ===",
+                f"=== REANUDANDO S{sec_num} V_acum={current_turns} ===",
                 "info",
             )
 
             self._send_recipe_thread(recipe)
             time.sleep(0.3)
 
-            if pulsos > 0:
-                resp = self.serial.send(f"SETENC:{pulsos}")
+            if position_data.pulses > 0:
+                resp = self.serial.send(f"SETENC:{position_data.pulses}")
                 self.log(
-                    f"SETENC {pulsos} pulsos ({vuelta_acum:.1f}v): {resp}",
+                    f"SETENC {position_data.pulses} pulsos ({current_turns:.1f}v): {resp}",
                     "info",
                 )
                 time.sleep(0.15)
@@ -731,7 +659,7 @@ class App(ctk.CTk):
                 self.log("Vuelta 0 — encoder en 0", "info")
 
             sec_idx = sec_num - 1
-            run_cmd = f"RUN:{rec_name}:SEC:{sec_idx}"
+            run_cmd = self.recipe_service.build_run_section_command(rec_name, sec_idx)
             resp = self.serial.send(run_cmd)
             self.log(f"RUN S{sec_num}: {resp}", "ok")
 
@@ -748,21 +676,24 @@ class App(ctk.CTk):
             self.after(
                 0,
                 lambda: (
-                    self.position_tab.set_summary(f"✓ S{sec_num} C{capa_num} @{vuelta_acum}v")
+                    self.position_tab.set_summary(
+                        f"✓ S{sec_num} C{position_data.layer_number} @{current_turns}v"
+                    )
                     if hasattr(self, "position_tab") and self.position_tab
-                    else self.pos_summary.configure(text=f"✓ S{sec_num} C{capa_num} @{vuelta_acum}v")
+                    else self.pos_summary.configure(
+                        text=f"✓ S{sec_num} C{position_data.layer_number} @{current_turns}v"
+                    )
                 )
             )
             self.after(
                 0,
                 lambda: self._show_alert(
-                    f"Reanudando S{sec_num} C{capa_num} @{vuelta_acum}v — Pise el PEDAL",
+                    f"Reanudando S{sec_num} C{position_data.layer_number} @{current_turns}v — Pise el PEDAL",
                     ACCENT_GREEN,
                 )
             )
 
         threading.Thread(target=_thread, daemon=True).start()
-
     # ── Recetas ───────────────────────────────────────────────
     def _load_recipe_list(self):
         for w in self.recipe_list_frame.winfo_children():
