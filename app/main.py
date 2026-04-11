@@ -18,8 +18,6 @@ from app.services.recipe_service import RecipeService
 
 from app.serial_manager import SerialManager
 from app.recipe_manager import (
-    validate_recipe,
-    save_recipe,
     load_recipe,
     list_recipes,
     delete_recipe,
@@ -39,13 +37,7 @@ from app.core.theme import (
     ACCENT_PURPLE,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
-    BORDER_COLOR,
-    F_TITLE,
-    F_HEAD,
     F_BODY,
-    F_BODY_B,
-    F_BIG,
-    F_SMALL,
     setup_theme,
 )
 from app.core.constants import ESTADOS
@@ -76,8 +68,6 @@ class App(ctk.CTk):
         self.connected            = False
         self.current_recipe       = None
         self.selected_recipe_name = None
-        self._jog_active          = False
-        self._jog_direction       = "right"
         self._manual_activo       = False
 
         self.esp_estado   = tk.StringVar(value="IDLE")
@@ -229,18 +219,11 @@ class App(ctk.CTk):
         self.control_tab.build()
 
         # Referencias puente para mantener compatibilidad temporal
-        self.alert_label = self.control_tab.alert_label
         self.btn_manual = self.control_tab.btn_manual
         self.run_recipe_var = self.control_tab.run_recipe_var
         self.run_combo = self.control_tab.run_combo
 
-        self.jog_left_single = self.control_tab.jog_left_single
-        self.jog_left_btn = self.control_tab.jog_left_btn
-        self.jog_right_btn = self.control_tab.jog_right_btn
-        self.jog_right_single = self.control_tab.jog_right_single
-        self.jog_status = self.control_tab.jog_status
         self.jog_paso_actual = self.control_tab.jog_paso_actual
-        self.jog_pos_label = self.control_tab.jog_pos_label
         self.jog_paso_entry = self.control_tab.jog_paso_entry
         self.jog_paso_btns = self.control_tab.jog_paso_btns
         self.jog_paso_var = self.control_tab.jog_paso_var
@@ -525,8 +508,8 @@ class App(ctk.CTk):
         if not rec:
             return
 
-        n = len(rec.get("secciones", []))
-        vals = [str(i + 1) for i in range(n)]
+        vals = self.recipe_service.get_section_number_values(rec)
+
         if hasattr(self, "position_tab") and self.position_tab:
             self.position_tab.set_section_values(vals)
             if vals:
@@ -578,26 +561,33 @@ class App(ctk.CTk):
                 self.pos_capa_info.configure(text="")
 
     def _inc_pos(self, field, delta):
-        if field == "vuelta":
-            try:
-                rec = load_recipe(self.pos_recipe_var.get())
-                if not rec:
-                    return
+        if field != "vuelta":
+            return
 
-                si = int(self.pos_sec_var.get()) - 1
-                sec = rec["secciones"][si]
-                capas = sec.get("capas", [])
-                total = capas[-1] if capas else 0.0
+        try:
+            rec = load_recipe(self.pos_recipe_var.get())
+            if not rec:
+                return
 
-                v = round(float(self.pos_vuelta_var.get()) + delta, 1)
-                v = max(0.0, min(v, total))
-                if hasattr(self, "position_tab") and self.position_tab:
-                    self.position_tab.set_vuelta(str(v))
-                else:
-                    self.pos_vuelta_var.set(str(v))
-                self._update_pos_info()
-            except (ValueError, IndexError):
-                pass
+            sec_num = int(self.pos_sec_var.get())
+            current_turns = float(self.pos_vuelta_var.get())
+
+            new_value = self.recipe_service.increment_turn_value(
+                rec,
+                sec_num,
+                current_turns,
+                delta,
+            )
+
+            if hasattr(self, "position_tab") and self.position_tab:
+                self.position_tab.set_vuelta(str(new_value))
+            else:
+                self.pos_vuelta_var.set(str(new_value))
+
+            self._update_pos_info()
+
+        except ValueError:
+            pass
 
     def _apply_position(self):
         if not self.connected:
@@ -746,9 +736,6 @@ class App(ctk.CTk):
             self.control_tab.set_selected_run_recipe(run_name)
         else:
             self.run_recipe_var.set(run_name)
-
-    def _recipe_summary(self, recipe):
-        return self.recipe_service.build_recipe_summary(recipe)
 
     def _delete_selected_recipe(self):
         ok, message = self.recipe_service.can_delete_recipe(self.selected_recipe_name)

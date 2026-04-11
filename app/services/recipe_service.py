@@ -39,14 +39,6 @@ class SectionPositionData:
 class RecipeService:
     """
     Servicio de apoyo para lógica de recetas que no depende de UI.
-
-    Etapa actual:
-    - construir resumen legible de receta
-    - helpers simples para listas y valores de UI
-    - resolver selección de receta
-    - validar y guardar receta
-    - convertir receta a comandos para el controlador
-    - calcular datos de posición/reanudación por sección
     """
 
     def build_recipe_summary(self, recipe: dict[str, Any]) -> str:
@@ -95,6 +87,10 @@ class RecipeService:
 
     def get_section_count(self, recipe: dict[str, Any]) -> int:
         return len(recipe.get("secciones", []))
+
+    def get_section_number_values(self, recipe: dict[str, Any]) -> list[str]:
+        count = self.get_section_count(recipe)
+        return [str(i + 1) for i in range(count)]
 
     def has_recipe(self, recipe: dict[str, Any] | None) -> bool:
         return bool(recipe and recipe.get("nombre"))
@@ -154,11 +150,6 @@ class RecipeService:
         )
 
     def build_recipe_upload_commands(self, recipe: dict[str, Any]) -> list[tuple[str, str]]:
-        """
-        Devuelve una lista de pares:
-        - etiqueta legible para logs
-        - comando serial a enviar
-        """
         commands: list[tuple[str, str]] = []
 
         recipe_name = self.get_recipe_display_name(recipe)
@@ -259,6 +250,37 @@ class RecipeService:
             next_derivation_text=next_derivation_text,
         )
 
+    def normalize_turn_value(
+        self,
+        recipe: dict[str, Any],
+        section_number: int,
+        current_turns: float,
+    ) -> float:
+        position_data = self.get_section_position_data(
+            recipe,
+            section_number,
+            current_turns,
+        )
+        value = position_data.turns_before_layer + position_data.turns_in_layer
+        return round(value, 1)
+
+    def increment_turn_value(
+        self,
+        recipe: dict[str, Any],
+        section_number: int,
+        current_turns: float,
+        delta: float,
+    ) -> float:
+        sec = self._get_section(recipe, section_number)
+        capas = sec.get("capas", [])
+        if not capas:
+            raise ValueError(f"S{section_number} sin capas")
+
+        total = float(capas[-1])
+        new_value = round(current_turns + delta, 1)
+        new_value = max(0.0, min(new_value, total))
+        return round(new_value, 1)
+
     def build_section_info_text(self, recipe: dict[str, Any], section_number: int) -> str:
         sec = self._get_section(recipe, section_number)
         return f"{sec.get('nombre', '')}  [{sec.get('tipo', 'BOB')}]"
@@ -276,12 +298,13 @@ class RecipeService:
         recipe_name: str,
         position_data: SectionPositionData,
     ) -> str:
+        current_turns = position_data.turns_before_layer + position_data.turns_in_layer
         return (
             f"Receta   : {recipe_name}\n"
             f"Sección  : {position_data.section_number} — "
             f"{position_data.section_name} [{position_data.section_type}]\n"
             f"─────────────────────────────\n"
-            f"Vuelta acum. : {position_data.turns_before_layer + position_data.turns_in_layer:.1f}v "
+            f"Vuelta acum. : {current_turns:.1f}v "
             f"(de {position_data.total_section_turns:.1f}v totales)\n"
             f"Capa detect. : {position_data.layer_number} "
             f"({position_data.turns_in_layer:.1f}v dentro de capa)\n"

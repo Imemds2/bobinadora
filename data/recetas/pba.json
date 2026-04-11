@@ -1,0 +1,40 @@
+{
+  "nombre": "pba",
+  "espesorX10": 20,
+  "secciones": [
+    {
+      "tipo": "BOB",
+      "nombre": "a",
+      "capas": [
+        1.0
+      ],
+      "dirs": [
+        true
+      ],
+      "derivaciones": [
+        {
+          "vuelta": 1.0,
+          "etiqueta": "1",
+          "mensaje": ""
+        }
+      ]
+    },
+    {
+      "tipo": "BOB",
+      "nombre": "b",
+      "capas": [
+        2.0
+      ],
+      "dirs": [
+        true
+      ],
+      "derivaciones": [
+        {
+          "vuelta": 2.0,
+          "etiqueta": "2",
+          "mensaje": ""
+        }
+      ]
+    }
+  ]
+}
