@@ -4,8 +4,8 @@
   "freno_no": true,
   "dir_inicial": true,
   "vueltas_prefreno": 5,
-  "puerto": "COM9",
+  "puerto": "COM3",
   "baudrate": 115200,
   "tema": "dark",
-  "machine_backend": "simulated"
+  "machine_backend": "serial"
 }

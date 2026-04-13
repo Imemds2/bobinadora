@@ -15,6 +15,7 @@ from app.state.app_state import AppState
 from app.controllers.control_controller import ControlController, ControlUiHooks
 from app.services.status_service import StatusService
 from app.services.recipe_service import RecipeService
+from app.services.config_service import ConfigService
 
 from app.serial_manager import SerialManager
 from app.recipe_manager import (
@@ -22,7 +23,6 @@ from app.recipe_manager import (
     list_recipes,
     delete_recipe,
 )
-from app.protocol import parse_status_msg
 
 from app.core.theme import (
     BG_DARK,
@@ -40,7 +40,6 @@ from app.core.theme import (
     F_BODY,
     setup_theme,
 )
-from app.core.constants import ESTADOS
 from app.core.config_store import cargar_config, guardar_config
 
 from app.ui.dialogs.recipe_form import RecipeForm
@@ -64,6 +63,7 @@ class App(ctk.CTk):
         self.control_controller = None
         self.status_service = StatusService()
         self.recipe_service = RecipeService()
+        self.config_service = ConfigService()
 
         self.connected            = False
         self.current_recipe       = None
@@ -97,6 +97,9 @@ class App(ctk.CTk):
                 0, lambda o=ok, i=info: self.on_connection_change(o, i)
             ),
         )
+        if hasattr(self.machine, "attach_serial_manager"):
+            self.machine.attach_serial_manager(self.serial)
+
         self._init_control_controller()
         self.after(100, self._machine_poll)
 
@@ -446,29 +449,21 @@ class App(ctk.CTk):
 
     # ── Configuración ─────────────────────────────────────────
     def _leer_cfg_entries(self) -> dict:
-        cfg = dict(self.cfg)
-
-        for key, (entry, tipo) in self.cfg_entries.items():
-            try:
-                v = entry.get().strip()
-                if tipo == "float":
-                    cfg[key] = float(v)
-                elif tipo == "int":
-                    cfg[key] = int(v)
-                elif tipo == "bool":
-                    cfg[key] = v in ("1", "true", "True")
-            except ValueError:
-                pass
-
+        backend_label = None
         if hasattr(self, "config_tab") and self.config_tab and self.config_tab.backend_var:
-            backend_label = self.config_tab.backend_var.get().strip().lower()
-            cfg["machine_backend"] = "serial" if backend_label == "serial" else "simulated"
+            backend_label = self.config_tab.backend_var.get()
 
-        return cfg
+        result = self.config_service.read_config_from_entries(
+            current_config=self.cfg,
+            cfg_entries=self.cfg_entries,
+            backend_label=backend_label,
+        )
+        return result.config
 
     def _guardar_config_local(self):
-        self.cfg = self._leer_cfg_entries()
-        self.cfg["puerto"] = self.port_var.get()
+        cfg = self._leer_cfg_entries()
+        cfg = self.config_service.apply_selected_port(cfg, self.port_var.get())
+        self.cfg = cfg
         guardar_config(self.cfg)
         self.log("Configuración guardada localmente", "ok")
 
@@ -487,17 +482,7 @@ class App(ctk.CTk):
         ).start()
 
     def _send_config_to_esp(self):
-        cfg = self.cfg
-        esp_x10 = int(round(cfg.get("espesor_mm", 1.0) * 10))
-        retf = cfg.get("retardo_freno", 1.5)
-        freno = 1 if cfg.get("freno_no", True) else 0
-        dirinit = 1 if cfg.get("dir_inicial", True) else 0
-        vpre = int(cfg.get("vueltas_prefreno", 5))
-
-        cmd = (
-            f"CONFIG:esp={esp_x10},retf={retf},"
-            f"frenoNO={freno},dirinit={dirinit},vpre={vpre}"
-        )
+        cmd = self.config_service.build_controller_config_command(self.cfg)
         resp = self.serial.send(cmd)
         self.log(f"CONFIG enviada: {resp}", "ok")
 
@@ -959,6 +944,9 @@ class App(ctk.CTk):
         status = self.status_service.parse_status_ui_data(msg)
         if not status:
             return
+        
+        if hasattr(self.machine, "apply_status_ui_data"):
+            self.machine.apply_status_ui_data(status)
 
         self.after(0, lambda s=status.estado_texto: self.esp_estado.set(s))
 
@@ -1014,6 +1002,9 @@ class App(ctk.CTk):
     def on_connection_change(self, connected, info):
         self.connected = connected
         self.app_state.connected = connected
+
+        if not connected and hasattr(self.machine, "mark_disconnected"):
+            self.machine.mark_disconnected()
 
         if self.control_controller:
             self.control_controller.sync_connection(connected, info)
