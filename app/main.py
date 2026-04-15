@@ -16,6 +16,7 @@ from app.controllers.control_controller import ControlController, ControlUiHooks
 from app.services.status_service import StatusService
 from app.services.recipe_service import RecipeService
 from app.services.config_service import ConfigService
+from app.services.log_service import LogService
 
 from app.serial_manager import SerialManager
 from app.recipe_manager import (
@@ -64,6 +65,10 @@ class App(ctk.CTk):
         self.status_service = StatusService()
         self.recipe_service = RecipeService()
         self.config_service = ConfigService()
+        self.log_service = LogService(
+            app_name = "bobinadora",
+            fsync_enabled = False,
+        )
 
         self.connected            = False
         self.current_recipe       = None
@@ -101,7 +106,24 @@ class App(ctk.CTk):
             self.machine.attach_serial_manager(self.serial)
 
         self._init_control_controller()
+        self.protocol("WM_DELETE_WINDOW", self._on_app_close)
         self.after(100, self._machine_poll)
+
+        self.log_service.session_start(
+            f"App iniciada | backend={backend} | puerto_cfg={self.cfg.get('puerto', '')}"
+        )
+
+        recent_error = self.log_service.get_last_relevant_event(["ERROR"])
+        closed_cleanly = self.log_service.was_last_session_closed_cleanly()
+
+        if recent_error:
+            self.log(f"Último error registrado: {recent_error}", "info")
+
+        if not closed_cleanly:
+            self.log(
+                "La sesión anterior no termino con cierre limpio",
+                "warn",
+            )
 
     def _machine_poll(self):
         try:
@@ -891,6 +913,13 @@ class App(ctk.CTk):
 
     # ── Monitor ───────────────────────────────────────────────
     def log(self, msg, tag="normal"):
+        msg = str(msg)
+        try:
+            persisted_line = self.log_service.log(msg, tag=tag)
+        except Exception as e:
+            persisted_line = None
+            print(f"[LogService] Error al escribir log: {e}")
+        
         ts = datetime.now().strftime("%H:%M:%S")
         txt = f"[{ts}] {msg}\n"
 
@@ -902,8 +931,8 @@ class App(ctk.CTk):
                 self.monitor_box._textbox.insert("end", txt, tag)
                 self.monitor_box._textbox.see("end")
                 self.monitor_box.configure(state="disabled")
-
         self.after(0, _ins)
+        return persisted_line
 
     def _clear_monitor(self):
         if hasattr(self, "monitor_tab") and self.monitor_tab:
@@ -913,6 +942,26 @@ class App(ctk.CTk):
         self.monitor_box.configure(state="normal")
         self.monitor_box.delete("1.0", "end")
         self.monitor_box.configure(state="disabled")
+
+    def _on_app_close(self):
+        try:
+            self.log_service.session_end("Cierre solicitado por usuario")
+        except Exception as e:
+            print(f"[LogService] Error al registrar cierre de sesión: {e}")
+
+        try:
+            if hasattr(self, "serial") and self.serial:
+                if hasattr(self.serial, "disconnect"):
+                    self.serial.disconnect()
+        except Exception as e:
+            print(f"[App] Error al cerrar serial: {e}")
+
+        try:
+            self.log_service.close()
+        except Exception as e:
+            print(f"[LogService] Error al cerrar archivo de log: {e}")
+
+        self.destroy()
 
     # ── Callbacks serial ──────────────────────────────────────
 
