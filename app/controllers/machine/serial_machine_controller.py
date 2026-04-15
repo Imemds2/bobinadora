@@ -28,10 +28,10 @@ class SerialMachineController:
     """
     Adaptador para trabajar con el controlador real vía SerialManager.
 
-    Segunda versión:
+    Esta versión:
     - envía comandos básicos
     - mantiene snapshot local
-    - puede sincronizarse desde STATUS procesado por la app
+    - sincroniza mejor el snapshot desde STATUS procesado por la app
     """
 
     def __init__(self, cfg: dict, serial_manager=None):
@@ -47,10 +47,6 @@ class SerialMachineController:
         self.serial = serial_manager
 
     def update(self) -> None:
-        """
-        En serial real no hacemos polling activo aquí.
-        El estado llega por callbacks externos.
-        """
         return
 
     def get_snapshot(self) -> SerialMachineSnapshot:
@@ -60,56 +56,36 @@ class SerialMachineController:
     # Sync desde STATUS
     # ---------------------------------------------------------
     def apply_status_ui_data(self, status) -> None:
-        """
-        Recibe el objeto producido por StatusService.parse_status_ui_data(...)
-        y actualiza el snapshot local del backend serial.
-        """
         if status is None:
             return
 
         self.snapshot.connected = True
 
-        self.snapshot.state = self._normalize_state(status.estado_texto)
+        # Datos base
         self.snapshot.recipe_name = status.recipe_name or self.snapshot.recipe_name
         self.snapshot.manual_mode = bool(status.is_manual)
-
         self.snapshot.current_layer = self._safe_int(status.layer_display, default=0)
         self.snapshot.target_turns = self._safe_float(status.target_turns, default=0.0)
         self.snapshot.current_turns = self._safe_float(status.current_turns, default=0.0)
         self.snapshot.rpm = self._safe_float(status.rpm, default=0.0)
         self.snapshot.position_mm = self._position_cm_text_to_mm(status.position_cm)
 
-        if status.alert_color:
-            if "ERR" in self.snapshot.state.upper() or "ERROR" in self.snapshot.state.upper():
-                self.snapshot.alarm_message = status.alert_text or self.snapshot.alarm_message
-            elif status.estado_num in ("5",):
-                # pausa por derivación / rojo, no necesariamente error fatal
-                self.snapshot.alarm_message = ""
-            else:
-                self.snapshot.alarm_message = ""
+        # Estado principal guiado por el código de estado del protocolo
+        self.snapshot.state = self._map_state_from_status(status)
 
-        if status.estado_num in ("13",):
-            self.snapshot.state = "MANUAL"
-        elif status.estado_num in ("12",):
-            self.snapshot.state = "HOMING"
-        elif status.estado_num in ("9",):
-            self.snapshot.state = "JOG"
-        elif status.estado_num in ("1",):
-            self.snapshot.state = "RUNNING"
-        elif status.estado_num in ("3", "5", "7", "11"):
-            self.snapshot.state = "PAUSED"
-        elif status.estado_num in ("0", "4", "6", "8", "10"):
-            if not self.snapshot.manual_mode:
-                self.snapshot.state = "IDLE"
-
-        if self.snapshot.manual_mode:
+        # Dirección de jog: si ya no está en JOG, la limpiamos
+        if self.snapshot.state != "JOG":
             self._jogging_direction = None
+
+        # Gestión de alarmas
+        self.snapshot.alarm_message = self._map_alarm_message(status)
 
     def mark_disconnected(self) -> None:
         self.snapshot.connected = False
         self.snapshot.manual_mode = False
         self.snapshot.state = "IDLE"
         self.snapshot.rpm = 0.0
+        self.snapshot.alarm_message = ""
         self._jogging_direction = None
 
     # ---------------------------------------------------------
@@ -125,7 +101,6 @@ class SerialMachineController:
             self.snapshot.alarm_message = "Puerto no especificado"
             return False
 
-        # La conexión real la maneja SerialManager externamente.
         self.snapshot.connected = True
         self.snapshot.alarm_message = ""
         return True
@@ -141,7 +116,6 @@ class SerialMachineController:
         if self.serial is None:
             self.snapshot.alarm_message = "SerialManager no disponible"
             return None
-
         return self.serial.send(cmd)
 
     def _response_has_error(self, response) -> bool:
@@ -178,34 +152,59 @@ class SerialMachineController:
         except ValueError:
             return 0.0
 
-    def _normalize_state(self, state_text: str) -> str:
-        text = str(state_text or "").strip().upper()
+    def _map_state_from_status(self, status) -> str:
+        estado_num = str(getattr(status, "estado_num", "") or "")
+        estado_texto = str(getattr(status, "estado_texto", "") or "").upper()
 
-        mapping = {
-            "IDLE": "IDLE",
-            "RUNNING": "RUNNING",
-            "HOMING": "HOMING",
-            "MANUAL": "MANUAL",
-            "JOG": "JOG",
-            "PAUSED": "PAUSED",
+        state_by_num = {
+            "0": "IDLE",
+            "1": "RUNNING",
+            "2": "RUNNING",   # prefreno, sigue en trabajo
+            "3": "PAUSED",
+            "4": "IDLE",      # desbloqueado esperando pedal
+            "5": "PAUSED",
+            "6": "IDLE",
+            "7": "PAUSED",
+            "8": "IDLE",      # bobina completa
+            "9": "JOG",
+            "10": "RUNNING",  # barrera con pedal
+            "11": "PAUSED",
+            "12": "HOMING",
+            "13": "MANUAL",
         }
 
-        if text in mapping:
-            return mapping[text]
+        if estado_num in state_by_num:
+            return state_by_num[estado_num]
 
-        if "HOMING" in text:
+        # Fallback por texto, por si cambia algo del protocolo
+        if "HOMING" in estado_texto:
             return "HOMING"
-        if "MANUAL" in text:
+        if "MANUAL" in estado_texto:
             return "MANUAL"
-        if "JOG" in text:
+        if "JOG" in estado_texto:
             return "JOG"
-        if "RUN" in text or "BOBIN" in text:
+        if "RUN" in estado_texto or "BOBIN" in estado_texto:
             return "RUNNING"
-        if "PAUS" in text or "FIN" in text:
+        if "PAUS" in estado_texto or "FIN" in estado_texto:
             return "PAUSED"
-        if not text:
-            return "IDLE"
-        return text
+
+        return "IDLE"
+
+    def _map_alarm_message(self, status) -> str:
+        estado_num = str(getattr(status, "estado_num", "") or "")
+        alert_text = str(getattr(status, "alert_text", "") or "").strip()
+
+        # Estados que no consideramos error, aunque muestren alerta visual
+        non_error_states = {"0", "1", "2", "3", "4", "6", "7", "8", "9", "10", "11", "12", "13"}
+        if estado_num in non_error_states:
+            return ""
+
+        # Si en algún momento llegaran estados realmente anómalos,
+        # podemos conservar la alerta como mensaje de alarma.
+        if alert_text and estado_num not in {"5"}:
+            return alert_text
+
+        return ""
 
     # ---------------------------------------------------------
     # Control principal
