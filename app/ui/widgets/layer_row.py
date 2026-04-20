@@ -7,6 +7,7 @@ from app.core.theme import (
     ACCENT_GREEN,
     ACCENT_RED,
     TEXT_PRIMARY,
+    TEXT_ON_ACCENT,
     BORDER_COLOR,
     DIR_FWD_COLOR,
     DIR_REV_COLOR,
@@ -51,7 +52,7 @@ class LayerRow(ctk.CTkFrame):
             command=self._toggle_dir,
             fg_color=self._dir_color(),
             hover_color=self._dir_hover(),
-            text_color=BG_INPUT if self._direction else TEXT_PRIMARY,
+            text_color=TEXT_ON_ACCENT,
             width=180,
             height=44,
             font=ctk.CTkFont("Consolas", 14, "bold"),
@@ -86,7 +87,7 @@ class LayerRow(ctk.CTkFrame):
             text=self._dir_text(),
             fg_color=self._dir_color(),
             hover_color=self._dir_hover(),
-            text_color=BG_INPUT if self._direction else TEXT_PRIMARY,
+            text_color=TEXT_ON_ACCENT,
         )
 
     def update_num(self, n):

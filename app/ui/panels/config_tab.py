@@ -1,12 +1,12 @@
 import customtkinter as ctk
 
 from app.core.theme import (
-    BG_DARK,
     BG_CARD,
     BG_INPUT,
     ACCENT_GREEN,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
+    TEXT_ON_ACCENT,
     BORDER_COLOR,
     F_TITLE,
     F_BODY,
@@ -33,6 +33,8 @@ class ConfigTab:
         self.cfg_entries = {}
         self.backend_var = None
         self.backend_combo = None
+        self.theme_var = None
+        self.theme_combo = None
 
     def build(self):
         self.tab = self.tabview.tab("  CONFIGURACIÓN  ")
@@ -136,6 +138,49 @@ class ConfigTab:
             text_color=TEXT_SECONDARY,
         ).pack(side="left", padx=10)
 
+        theme_row = ctk.CTkFrame(card, fg_color="transparent")
+        theme_row.pack(fill="x", padx=20, pady=8)
+
+        ctk.CTkLabel(
+            theme_row,
+            text="Tema visual",
+            font=ctk.CTkFont(*F_BODY),
+            text_color=TEXT_PRIMARY,
+            width=320,
+            anchor="w",
+        ).pack(side="left")
+
+        theme_value = str(self.cfg.get("theme_mode", "light")).strip().lower()
+        theme_label = "Oscuro" if theme_value == "dark" else "Claro"
+
+        self.theme_var = ctk.StringVar(value=theme_label)
+
+        self.theme_combo = ctk.CTkComboBox(
+            theme_row,
+            values=["Claro", "Oscuro"],
+            variable=self.theme_var,
+            state="readonly",
+            fg_color=BG_INPUT,
+            border_color=BORDER_COLOR,
+            button_color=BG_INPUT,
+            button_hover_color=BORDER_COLOR,
+            text_color=ACCENT_GREEN,
+            dropdown_fg_color=BG_CARD,
+            dropdown_hover_color=BG_INPUT,
+            dropdown_text_color=TEXT_PRIMARY,
+            font=ctk.CTkFont(*F_BODY),
+            width=160,
+            justify="center",
+        )
+        self.theme_combo.pack(side="left", padx=10)
+
+        ctk.CTkLabel(
+            theme_row,
+            text="Se aplica al reiniciar la app",
+            font=ctk.CTkFont(*F_SMALL),
+            text_color=TEXT_SECONDARY,
+        ).pack(side="left", padx=10)
+
         br = ctk.CTkFrame(card, fg_color="transparent")
         br.pack(pady=16, padx=20, fill="x")
 
@@ -158,7 +203,7 @@ class ConfigTab:
             command=self._handle_send_config,
             fg_color=ACCENT_GREEN,
             hover_color="#00CC6A",
-            text_color=BG_DARK,
+            text_color=TEXT_ON_ACCENT,
             height=46,
             font=ctk.CTkFont(*F_BODY_B),
         ).pack(side="left", expand=True, fill="x")
@@ -181,3 +226,12 @@ class ConfigTab:
     def _handle_send_config(self):
         if self.on_send_config:
             self.on_send_config()
+
+    def get_theme_label(self) -> str:
+        if not self.theme_var:
+            return "Claro"
+        return self.theme_var.get().strip() or "Claro"
+
+    def set_theme_label(self, theme_label: str) -> None:
+        if self.theme_var:
+            self.theme_var.set(theme_label)

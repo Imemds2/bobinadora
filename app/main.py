@@ -1,6 +1,9 @@
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox
+from pathlib import Path
+import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
@@ -26,6 +29,7 @@ from app.recipe_manager import (
 )
 
 from app.core.theme import (
+    APP_BG,
     BG_DARK,
     BG_PANEL,
     BG_CARD,
@@ -40,6 +44,9 @@ from app.core.theme import (
     TEXT_SECONDARY,
     F_BODY,
     setup_theme,
+    TEXT_ON_ACCENT,
+    get_theme_mode_label,
+    cycle_theme_mode,
 )
 from app.core.config_store import cargar_config, guardar_config
 
@@ -53,7 +60,7 @@ class App(ctk.CTk):
         self.title("BOBINADORA HMI  v5.3")
         self.geometry("1920x1080")
         self.minsize(1200, 750)
-        self.configure(fg_color=BG_DARK)
+        self.configure(fg_color=APP_BG)
 
         self.cfg = cargar_config()
 
@@ -150,7 +157,11 @@ class App(ctk.CTk):
         self._build_tabs(content)
 
     def _build_header(self):
-        self.header_panel = HeaderPanel(self)
+        self.header_panel = HeaderPanel(
+            self,
+            on_toggle_theme=self._toggle_theme_mode,
+            theme_label=get_theme_mode_label(self.cfg.get("theme_mode", "light")),
+        )
         self.header_panel.build()
 
         self.conn_indicator = self.header_panel.conn_indicator
@@ -416,7 +427,7 @@ class App(ctk.CTk):
                 text="⚙  ACTIVAR MODO MANUAL",
                 fg_color=ACCENT_ORANGE,
                 hover_color="#CC6633",
-                text_color=BG_DARK,
+                text_color=TEXT_ON_ACCENT,
             )
 
     # ── JOG ───────────────────────────────────────────────────
@@ -430,7 +441,7 @@ class App(ctk.CTk):
             if abs(m - mm) < 0.001:
                 btn.configure(
                     fg_color=ACCENT_YELLOW,
-                    text_color=BG_DARK,
+                    text_color=TEXT_ON_ACCENT,
                 )
             else:
                 btn.configure(
@@ -472,22 +483,32 @@ class App(ctk.CTk):
     # ── Configuración ─────────────────────────────────────────
     def _leer_cfg_entries(self) -> dict:
         backend_label = None
+        theme_label = None
         if hasattr(self, "config_tab") and self.config_tab and self.config_tab.backend_var:
             backend_label = self.config_tab.backend_var.get()
+        if hasattr(self, "config_tab") and self.config_tab and self.config_tab.theme_var:
+            theme_label = self.config_tab.theme_var.get()
 
         result = self.config_service.read_config_from_entries(
             current_config=self.cfg,
             cfg_entries=self.cfg_entries,
             backend_label=backend_label,
+            theme_label=theme_label,
         )
         return result.config
 
     def _guardar_config_local(self):
+        old_theme = str(self.cfg.get("theme_mode", "light")).strip().lower()
         cfg = self._leer_cfg_entries()
         cfg = self.config_service.apply_selected_port(cfg, self.port_var.get())
         self.cfg = cfg
         guardar_config(self.cfg)
+        self._sync_theme_ui()
         self.log("Configuración guardada localmente", "ok")
+
+        new_theme = str(self.cfg.get("theme_mode", "light")).strip().lower()
+        if new_theme != old_theme:
+            self._prompt_theme_restart(new_theme)
 
     def _enviar_config_esp(self):
         self._guardar_config_local()
@@ -1089,3 +1110,73 @@ class App(ctk.CTk):
             text=datetime.now().strftime("%d/%m/%Y  %H:%M:%S")
         )
         self.after(1000, self._update_clock)
+
+    def _sync_theme_ui(self):
+        theme_label = get_theme_mode_label(self.cfg.get("theme_mode", "light"))
+
+        if hasattr(self, "header_panel") and self.header_panel:
+            self.header_panel.set_theme_label(theme_label)
+
+        if hasattr(self, "config_tab") and self.config_tab:
+            self.config_tab.set_theme_label(theme_label)
+
+    def _toggle_theme_mode(self):
+        current_mode = str(self.cfg.get("theme_mode", "light")).strip().lower()
+        next_mode = cycle_theme_mode(current_mode)
+        self.cfg["theme_mode"] = next_mode
+        guardar_config(self.cfg)
+        self._sync_theme_ui()
+        self.log(
+            f"Tema cambiado a {get_theme_mode_label(next_mode)}. Reinicie para aplicarlo.",
+            "info",
+        )
+        self._prompt_theme_restart(next_mode)
+
+    def _prompt_theme_restart(self, theme_mode: str):
+        theme_label = get_theme_mode_label(theme_mode)
+        restart_now = messagebox.askyesno(
+            "Aplicar tema",
+            f"El tema quedó en modo {theme_label}.\n\n"
+            "Para aplicar todos los colores hace falta reiniciar la app.\n\n"
+            "¿Reiniciar ahora?",
+        )
+
+        if restart_now:
+            self._restart_app()
+
+    def _restart_app(self):
+        project_root = Path(__file__).resolve().parents[1]
+        run_script = project_root / "run.py"
+        python_from_venv = Path(sys.prefix) / "Scripts" / "python.exe"
+        python_executable = python_from_venv if python_from_venv.exists() else Path(sys.executable)
+
+        try:
+            self.log_service.session_end("Reinicio solicitado por cambio de tema")
+        except Exception as e:
+            print(f"[LogService] Error al registrar reinicio: {e}")
+
+        try:
+            if hasattr(self, "serial") and self.serial and hasattr(self.serial, "disconnect"):
+                self.serial.disconnect()
+        except Exception as e:
+            print(f"[App] Error al cerrar serial antes de reinicio: {e}")
+
+        try:
+            self.log_service.close()
+        except Exception as e:
+            print(f"[LogService] Error al cerrar log antes de reinicio: {e}")
+
+        try:
+            subprocess.Popen(
+                [str(python_executable), str(run_script)],
+                cwd=str(project_root),
+            )
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                "No se pudo reiniciar la aplicación.\n\n"
+                f"Detalle: {e}",
+            )
+            return
+
+        self.destroy()

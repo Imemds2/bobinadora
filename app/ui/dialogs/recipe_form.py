@@ -3,6 +3,7 @@ from tkinter import messagebox
 import tkinter as tk
 
 from app.core.theme import (
+    APP_BG,
     BG_DARK,
     BG_PANEL,
     BG_CARD,
@@ -15,6 +16,7 @@ from app.core.theme import (
     ACCENT_PURPLE,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
+    TEXT_ON_ACCENT,
     BORDER_COLOR,
     F_TITLE,
     F_HEAD,
@@ -31,7 +33,7 @@ class RecipeForm(ctk.CTkToplevel):
         super().__init__(parent)
         self.title("Editor de Receta — Bobinadora HMI v5.3")
         self.geometry("1060x820")
-        self.configure(fg_color=BG_DARK)
+        self.configure(fg_color=APP_BG)
         self.grab_set()
         self.resizable(True, True)
         self.lift()
@@ -80,7 +82,7 @@ class RecipeForm(ctk.CTkToplevel):
             command=self._save,
             fg_color=ACCENT_GREEN,
             hover_color="#00CC6A",
-            text_color=BG_DARK,
+            text_color=TEXT_ON_ACCENT,
             height=50,
             width=380,
             font=ctk.CTkFont("Consolas", 16, "bold"),
@@ -92,7 +94,7 @@ class RecipeForm(ctk.CTkToplevel):
             command=self.destroy,
             fg_color=ACCENT_RED,
             hover_color="#CC2222",
-            text_color=TEXT_PRIMARY,
+            text_color=TEXT_ON_ACCENT,
             height=50,
             width=220,
             font=ctk.CTkFont("Consolas", 16, "bold"),
@@ -100,7 +102,7 @@ class RecipeForm(ctk.CTkToplevel):
 
         self.scroll = ctk.CTkScrollableFrame(
             self,
-            fg_color=BG_DARK,
+            fg_color=APP_BG,
             corner_radius=0,
         )
         self.scroll.pack(fill="both", expand=True, side="top")
@@ -224,7 +226,7 @@ class RecipeForm(ctk.CTkToplevel):
             command=lambda s=sec_idx: self._add_layer(s),
             fg_color=ACCENT_GREEN,
             hover_color="#00CC6A",
-            text_color=BG_DARK,
+            text_color=TEXT_ON_ACCENT,
             height=38,
             width=180,
             font=ctk.CTkFont(*F_BODY_B),
@@ -252,7 +254,7 @@ class RecipeForm(ctk.CTkToplevel):
             font=ctk.CTkFont(*F_BODY_B),
             fg_color=ACCENT_BLUE,
             hover_color="#4080CC",
-            text_color=TEXT_PRIMARY,
+            text_color=TEXT_ON_ACCENT,
         )
         bob_btn.pack(side="left", padx=4)
 
@@ -272,7 +274,7 @@ class RecipeForm(ctk.CTkToplevel):
             tipo_var.set("BOB")
             bob_btn.configure(
                 fg_color=ACCENT_BLUE,
-                text_color=TEXT_PRIMARY,
+                text_color=TEXT_ON_ACCENT,
             )
             bar_btn.configure(
                 fg_color=BG_INPUT,
@@ -287,7 +289,7 @@ class RecipeForm(ctk.CTkToplevel):
             )
             bar_btn.configure(
                 fg_color=ACCENT_PURPLE,
-                text_color=TEXT_PRIMARY,
+                text_color=TEXT_ON_ACCENT,
             )
 
         bob_btn.configure(command=_set_bob)
@@ -393,7 +395,7 @@ class RecipeForm(ctk.CTkToplevel):
             command=lambda s=sec_idx: self._add_derivacion(s),
             fg_color=ACCENT_YELLOW,
             hover_color="#CC9200",
-            text_color=BG_DARK,
+            text_color=TEXT_ON_ACCENT,
             height=36,
             width=160,
             font=ctk.CTkFont(*F_BODY_B),

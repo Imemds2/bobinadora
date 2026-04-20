@@ -9,6 +9,7 @@ def cargar_config() -> dict:
         "freno_no": True,
         "dir_inicial": True,
         "vueltas_prefreno": 5,
+        "theme_mode": "light",
         "puerto": "",
         "baudrate": 115200,
     }

@@ -12,6 +12,7 @@ from app.core.theme import (
     ACCENT_PURPLE,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
+    TEXT_ON_ACCENT,
     BORDER_COLOR,
     F_BODY,
     F_BODY_B,
@@ -95,7 +96,7 @@ class SidebarPanel:
             command=self._handle_toggle_connect,
             fg_color=ACCENT_GREEN,
             hover_color="#00CC6A",
-            text_color=BG_INPUT,
+            text_color=TEXT_ON_ACCENT,
             height=44,
             font=ctk.CTkFont(*F_BODY_B),
         )
@@ -199,7 +200,7 @@ class SidebarPanel:
             text="CONECTAR",
             fg_color=ACCENT_GREEN,
             hover_color="#00CC6A",
-            text_color=BG_INPUT,
+            text_color=TEXT_ON_ACCENT,
         )
 
     def set_estado(self, value): self.esp_estado.set(value)

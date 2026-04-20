@@ -2,7 +2,6 @@ import customtkinter as ctk
 import tkinter as tk
 
 from app.core.theme import (
-    BG_DARK,
     BG_CARD,
     BG_INPUT,
     ACCENT_GREEN,
@@ -13,6 +12,7 @@ from app.core.theme import (
     ACCENT_PURPLE,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
+    TEXT_ON_ACCENT,
     BORDER_COLOR,
     F_TITLE,
     F_HEAD,
@@ -148,19 +148,19 @@ class ControlTab:
 
         self._ctrl_btn(
             bf, "▶  START", ACCENT_GREEN, "#00CC6A",
-            BG_DARK, self._handle_start, 0
+            TEXT_ON_ACCENT, self._handle_start, 0
         )
         self._ctrl_btn(
             bf, "■  STOP", ACCENT_RED, "#CC2222",
-            TEXT_PRIMARY, self._handle_stop, 1
+            TEXT_ON_ACCENT, self._handle_stop, 1
         )
         self._ctrl_btn(
             bf, "↺  RESET", ACCENT_YELLOW, "#CC9200",
-            BG_DARK, self._handle_reset, 2
+            TEXT_ON_ACCENT, self._handle_reset, 2
         )
         self._ctrl_btn(
             bf, "⌂  HOMING", ACCENT_BLUE, "#4080CC",
-            TEXT_PRIMARY, self._handle_homing, 3
+            TEXT_ON_ACCENT, self._handle_homing, 3
         )
 
     def _build_manual_mode(self):
@@ -180,7 +180,7 @@ class ControlTab:
             command=self._handle_manual_toggle,
             fg_color=ACCENT_ORANGE,
             hover_color="#CC6633",
-            text_color=BG_DARK,
+            text_color=TEXT_ON_ACCENT,
             height=44,
             width=260,
             font=ctk.CTkFont(*F_BODY_B),
@@ -263,7 +263,7 @@ class ControlTab:
             height=40,
             fg_color=ACCENT_GREEN,
             hover_color="#00CC6A",
-            text_color=BG_DARK,
+            text_color=TEXT_ON_ACCENT,
             font=ctk.CTkFont("Consolas", 14, "bold"),
             command=self._handle_set_jog_step_manual,
         ).pack(side="left", padx=(2, 10), pady=8)
@@ -276,8 +276,8 @@ class ControlTab:
         self.jog_left_single = ctk.CTkButton(
             jog_btn_row,
             text="◀  ←",
-            fg_color="#1C3A5C",
-            hover_color="#2A5580",
+            fg_color=BG_INPUT,
+            hover_color=BORDER_COLOR,
             text_color=ACCENT_BLUE,
             height=60,
             width=130,
@@ -290,8 +290,8 @@ class ControlTab:
         self.jog_left_btn = ctk.CTkButton(
             jog_btn_row,
             text="◀◀  CONTINUO",
-            fg_color="#1C3A5C",
-            hover_color="#2A5580",
+            fg_color=BG_INPUT,
+            hover_color=BORDER_COLOR,
             text_color=ACCENT_BLUE,
             height=60,
             width=180,
@@ -330,8 +330,8 @@ class ControlTab:
         self.jog_right_btn = ctk.CTkButton(
             jog_btn_row,
             text="CONTINUO  ▶▶",
-            fg_color="#1C3A5C",
-            hover_color="#2A5580",
+            fg_color=BG_INPUT,
+            hover_color=BORDER_COLOR,
             text_color=ACCENT_BLUE,
             height=60,
             width=180,
@@ -345,8 +345,8 @@ class ControlTab:
         self.jog_right_single = ctk.CTkButton(
             jog_btn_row,
             text="→  ▶",
-            fg_color="#1C3A5C",
-            hover_color="#2A5580",
+            fg_color=BG_INPUT,
+            hover_color=BORDER_COLOR,
             text_color=ACCENT_BLUE,
             height=60,
             width=130,
@@ -413,7 +413,7 @@ class ControlTab:
             command=self._handle_run_recipe,
             fg_color=ACCENT_BLUE,
             hover_color="#4080CC",
-            text_color=TEXT_PRIMARY,
+            text_color=TEXT_ON_ACCENT,
             height=46,
             width=230,
             font=ctk.CTkFont(*F_BODY_B),
@@ -460,14 +460,14 @@ class ControlTab:
                 text="⚙  DESACTIVAR MANUAL",
                 fg_color=ACCENT_RED,
                 hover_color="#CC2222",
-                text_color=TEXT_PRIMARY,
+                text_color=TEXT_ON_ACCENT,
             )
         else:
             self.btn_manual.configure(
                 text="⚙  ACTIVAR MODO MANUAL",
                 fg_color=ACCENT_ORANGE,
                 hover_color="#CC6633",
-                text_color=BG_DARK,
+                text_color=TEXT_ON_ACCENT,
             )
 
     def set_run_recipes(self, values):
@@ -486,7 +486,7 @@ class ControlTab:
             if abs(m - mm) < 0.001:
                 btn.configure(
                     fg_color=ACCENT_YELLOW,
-                    text_color=BG_DARK,
+                    text_color=TEXT_ON_ACCENT,
                 )
             else:
                 btn.configure(
@@ -519,10 +519,10 @@ class ControlTab:
         if direction == "left":
             self.jog_left_btn.configure(
                 fg_color=ACCENT_BLUE,
-                text_color=BG_DARK,
+                text_color=TEXT_ON_ACCENT,
             )
             self.jog_right_btn.configure(
-                fg_color="#1C3A5C",
+                fg_color=BG_INPUT,
                 text_color=ACCENT_BLUE,
             )
             self.jog_status.configure(
@@ -532,10 +532,10 @@ class ControlTab:
         else:
             self.jog_right_btn.configure(
                 fg_color=ACCENT_BLUE,
-                text_color=BG_DARK,
+                text_color=TEXT_ON_ACCENT,
             )
             self.jog_left_btn.configure(
-                fg_color="#1C3A5C",
+                fg_color=BG_INPUT,
                 text_color=ACCENT_BLUE,
             )
             self.jog_status.configure(
@@ -546,7 +546,7 @@ class ControlTab:
     def set_jog_stopped(self):
         for btn in [self.jog_left_btn, self.jog_right_btn]:
             btn.configure(
-                fg_color="#1C3A5C",
+                fg_color=BG_INPUT,
                 text_color=ACCENT_BLUE,
             )
 

@@ -1,7 +1,6 @@
 import customtkinter as ctk
 
 from app.core.theme import (
-    BG_DARK,
     BG_CARD,
     BG_INPUT,
     ACCENT_GREEN,
@@ -10,6 +9,7 @@ from app.core.theme import (
     ACCENT_BLUE,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
+    TEXT_ON_ACCENT,
     BORDER_COLOR,
     F_TITLE,
     F_HEAD,
@@ -83,7 +83,7 @@ class RecipesTab:
             command=self._handle_new_recipe,
             fg_color=ACCENT_GREEN,
             hover_color="#00CC6A",
-            text_color=BG_DARK,
+            text_color=TEXT_ON_ACCENT,
             height=46,
             font=ctk.CTkFont(*F_BODY_B),
         ).pack(side="left", expand=True, fill="x", padx=3)
@@ -94,7 +94,7 @@ class RecipesTab:
             command=self._handle_delete_recipe,
             fg_color=ACCENT_RED,
             hover_color="#CC2222",
-            text_color=TEXT_PRIMARY,
+            text_color=TEXT_ON_ACCENT,
             height=46,
             font=ctk.CTkFont(*F_BODY_B),
         ).pack(side="left", expand=True, fill="x", padx=3)
@@ -132,7 +132,7 @@ class RecipesTab:
             command=self._handle_send_to_controller,
             fg_color=ACCENT_BLUE,
             hover_color="#4080CC",
-            text_color=TEXT_PRIMARY,
+            text_color=TEXT_ON_ACCENT,
             height=46,
             font=ctk.CTkFont(*F_BODY_B),
         ).pack(side="left", expand=True, fill="x", padx=3)
@@ -143,7 +143,7 @@ class RecipesTab:
             command=self._handle_edit_recipe,
             fg_color=ACCENT_YELLOW,
             hover_color="#CC9200",
-            text_color=BG_DARK,
+            text_color=TEXT_ON_ACCENT,
             height=46,
             font=ctk.CTkFont(*F_BODY_B),
         ).pack(side="left", expand=True, fill="x", padx=3)

@@ -20,6 +20,7 @@ class ConfigService:
         current_config: dict[str, Any],
         cfg_entries: dict[str, tuple[Any, str]],
         backend_label: str | None = None,
+        theme_label: str | None = None,
     ) -> ConfigReadResult:
         cfg = dict(current_config)
 
@@ -38,11 +39,16 @@ class ConfigService:
                 pass
 
         cfg["machine_backend"] = self.resolve_backend_value(backend_label)
+        cfg["theme_mode"] = self.resolve_theme_value(theme_label)
         return ConfigReadResult(config=cfg)
 
     def resolve_backend_value(self, backend_label: str | None) -> str:
         label = str(backend_label or "").strip().lower()
         return "serial" if label == "serial" else "simulated"
+
+    def resolve_theme_value(self, theme_label: str | None) -> str:
+        label = str(theme_label or "").strip().lower()
+        return "dark" if label == "oscuro" else "light"
 
     def apply_selected_port(
         self,

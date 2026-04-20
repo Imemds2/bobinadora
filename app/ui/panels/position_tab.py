@@ -2,7 +2,6 @@ import customtkinter as ctk
 import tkinter as tk
 
 from app.core.theme import (
-    BG_DARK,
     BG_CARD,
     BG_INPUT,
     ACCENT_GREEN,
@@ -13,6 +12,7 @@ from app.core.theme import (
     ACCENT_PURPLE,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
+    TEXT_ON_ACCENT,
     BORDER_COLOR,
     F_TITLE,
     F_BODY,
@@ -211,7 +211,7 @@ class PositionTab:
             command=self._handle_apply_position,
             fg_color=ACCENT_GREEN,
             hover_color="#00CC6A",
-            text_color=BG_DARK,
+            text_color=TEXT_ON_ACCENT,
             height=62,
             width=500,
             font=ctk.CTkFont("Consolas", 18, "bold"),

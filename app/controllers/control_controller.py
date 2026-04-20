@@ -12,9 +12,9 @@ from app.core.theme import (
     ACCENT_ORANGE,
     ACCENT_RED,
     ACCENT_YELLOW,
-    BG_DARK,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
+    TEXT_ON_ACCENT,
 )
 
 
@@ -177,7 +177,7 @@ class ControlController:
                 "CONECTAR",
                 ACCENT_GREEN,
                 "#00CC6A",
-                BG_DARK,
+                TEXT_ON_ACCENT,
             )
             self.ui.set_alert(
                 "Desconectado — Reconecte el controlador"
@@ -242,7 +242,7 @@ class ControlController:
                 "CONECTAR",
                 ACCENT_GREEN,
                 "#00CC6A",
-                BG_DARK,
+                TEXT_ON_ACCENT,
             )
 
         if snapshot.has_error():
