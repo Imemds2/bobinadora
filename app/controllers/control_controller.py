@@ -115,12 +115,70 @@ class ControlController:
             "Verifica que el modo manual esté activo."
         )
 
-    def _reject_jog_pulse(self) -> None:
-        self.ui.show_warning(
-            "JOG",
-            "El simulador no aceptó el pulso.\n"
-            "Verifica que el modo manual esté activo y la máquina esté en reposo."
-        )
+    def jog_pulse(self, direction: str) -> None:
+        if not self._ensure_connected("No hay conexión"):
+            return
+
+        mm = self.ui.get_jog_step_mm()
+        mm_x100 = max(1, int(round(float(mm) * 100.0)))
+
+        direction_clean = (direction or "").strip().lower()
+        direction_cmd = "LEFT" if direction_clean == "left" else "RIGHT"
+
+        lbl = (f"{mm:.1f}".rstrip("0").rstrip(".") or "0") + "mm"
+        sym = "◀" if direction_clean == "left" else "▶"
+
+        self.ui.set_jog_status(f"{sym} {lbl}", ACCENT_YELLOW)
+
+        if self.use_simulator:
+            ok = self.machine.jog_step(direction_clean, mm)
+
+            if ok:
+                self.ui.log(
+                    f"JOG(sim) {direction_clean} {lbl} → OK",
+                    "info",
+                )
+                self.ui.after(
+                    150,
+                    lambda: self.ui.set_jog_status("◉ PARADO", TEXT_SECONDARY),
+                )
+            else:
+                self.ui.log(
+                    f"JOG(sim) {direction_clean} {lbl} rechazado",
+                    "error",
+                )
+                self.ui.set_jog_status("✗ RECHAZADO", ACCENT_RED)
+                self._reject_jog_pulse()
+                self.ui.after(
+                    500,
+                    lambda: self.ui.set_jog_status("◉ PARADO", TEXT_SECONDARY),
+                )
+            return
+
+        cmd = f"JOGMM_X100:{direction_cmd}:{mm_x100}"
+
+        def _worker():
+            resp = self.serial.send(cmd)
+            self.ui.log(
+                f"JOG {direction_clean} {lbl} ({mm_x100} x100): {resp}",
+                "info",
+            )
+
+            if resp and any("ERR" in str(x) or "CMD?" in str(x) for x in resp):
+                self.ui.after(
+                    0,
+                    lambda r=resp: self.ui.set_jog_status(
+                        f"✗ {str(r[0])[:20]}",
+                        ACCENT_RED,
+                    ),
+                )
+            else:
+                self.ui.after(
+                    0,
+                    lambda: self.ui.set_jog_status("◉ PARADO", TEXT_SECONDARY),
+                )
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ---------------------------------------------------------
     # Conexión / desconexión
@@ -277,11 +335,12 @@ class ControlController:
             ok = self.machine.start_job(
                 target_turns=target_turns,
                 recipe_name=recipe_name,
+                use_husillo=True,
             )
 
             if ok:
                 self.ui.log(
-                    f"START(sim) → receta={recipe_name}, meta={target_turns}",
+                    f"START(sim) → SYNC_ON, receta={recipe_name}, meta={target_turns}",
                     "ok",
                 )
             else:
@@ -292,8 +351,11 @@ class ControlController:
                 )
             return
 
-        resp = self.serial.send("STARTMAQ")
-        self.ui.log(f"START → {resp}", "ok")
+        def _worker():
+            resp = self.serial.send("SYNC_ON")
+            self.ui.log(f"START/SYNC_ON → {resp}", "ok")
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def cmd_stop(self) -> None:
         if not self._ensure_connected():
@@ -311,14 +373,17 @@ class ControlController:
                 )
             return
 
-        resp = self.serial.send("STOPMAQ")
-        self.ui.log(f"STOP → {resp}", "error")
+        def _worker():
+            resp = self.serial.send("STOP")
+            self.ui.log(f"STOP → {resp}", "error")
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def cmd_reset(self) -> None:
         if not self._ensure_connected():
             return
 
-        if not self.ui.confirm("Confirmar", "¿Resetear contador de vueltas?"):
+        if not self.ui.confirm("Confirmar", "¿Resetear contador de vueltas y posición lógica?"):
             return
 
         if self.use_simulator:
@@ -333,8 +398,11 @@ class ControlController:
                 )
             return
 
-        resp = self.serial.send("RESET")
-        self.ui.log(f"RESET → {resp}", "ok")
+        def _worker():
+            resp = self.serial.send("SYNC_RESET")
+            self.ui.log(f"SYNC_RESET → {resp}", "ok")
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def cmd_homing(self) -> None:
         if not self._ensure_connected():
@@ -359,8 +427,38 @@ class ControlController:
                 )
             return
 
-        resp = self.serial.send("HOMING")
-        self.ui.log(f"HOMING → {resp}", "info")
+        self.ui.set_alert("⌂ HOMING en progreso...", ACCENT_ORANGE)
+
+        def _worker():
+            resp = self.serial.send("HOMING")
+            self.ui.log(f"HOMING → {resp}", "info")
+
+            if resp and any("OK:HOMING:DONE" in str(x) for x in resp):
+                self.ui.after(
+                    0,
+                    lambda: self.ui.set_alert(
+                        "⌂ HOMING terminado — HOME OK",
+                        ACCENT_GREEN,
+                    ),
+                )
+            elif resp and any("ERR:HOMING" in str(x) for x in resp):
+                self.ui.after(
+                    0,
+                    lambda: self.ui.set_alert(
+                        "⚠ Error durante HOMING",
+                        ACCENT_RED,
+                    ),
+                )
+            else:
+                self.ui.after(
+                    0,
+                    lambda: self.ui.set_alert(
+                        "HOMING enviado. Verifique STATUS.",
+                        ACCENT_YELLOW,
+                    ),
+                )
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ---------------------------------------------------------
     # Modo manual
@@ -447,18 +545,22 @@ class ControlController:
             return
 
         mm = self.ui.get_jog_step_mm()
-        pasos = self.ui.mm_to_steps(mm)
+        mm_x100 = max(1, int(round(float(mm) * 100.0)))
+
+        direction_clean = (direction or "").strip().lower()
+        direction_cmd = "LEFT" if direction_clean == "left" else "RIGHT"
+
         lbl = (f"{mm:.1f}".rstrip("0").rstrip(".") or "0") + "mm"
-        sym = "◀" if direction == "left" else "▶"
+        sym = "◀" if direction_clean == "left" else "▶"
 
         self.ui.set_jog_status(f"{sym} {lbl}", ACCENT_YELLOW)
 
         if self.use_simulator:
-            ok = self.machine.jog_step(direction, mm)
+            ok = self.machine.jog_step(direction_clean, mm)
 
             if ok:
                 self.ui.log(
-                    f"JOG(sim) {direction} {lbl} ({pasos}p) → OK",
+                    f"JOG(sim) {direction_clean} {lbl} → OK",
                     "info",
                 )
                 self.ui.after(
@@ -467,7 +569,7 @@ class ControlController:
                 )
             else:
                 self.ui.log(
-                    f"JOG(sim) {direction} {lbl} ({pasos}p) rechazado",
+                    f"JOG(sim) {direction_clean} {lbl} rechazado",
                     "error",
                 )
                 self.ui.set_jog_status("✗ RECHAZADO", ACCENT_RED)
@@ -478,19 +580,20 @@ class ControlController:
                 )
             return
 
-        cmd = f"JOGMM:{direction.upper()}:{pasos}"
+        cmd = f"JOGMM_X100:{direction_cmd}:{mm_x100}"
 
         def _worker():
             resp = self.serial.send(cmd)
             self.ui.log(
-                f"JOG {direction} {lbl} ({pasos}p): {resp}",
+                f"JOG {direction_clean} {lbl} ({mm_x100} x100): {resp}",
                 "info",
             )
-            if resp and any("ERR" in x for x in resp):
+
+            if resp and any("ERR" in str(x) or "CMD?" in str(x) for x in resp):
                 self.ui.after(
                     0,
                     lambda r=resp: self.ui.set_jog_status(
-                        f"✗ {r[0][:20]}",
+                        f"✗ {str(r[0])[:20]}",
                         ACCENT_RED,
                     ),
                 )
@@ -550,14 +653,38 @@ class ControlController:
                 self.ui.log(f"JOG(sim) {direction} → OK", "info")
             return
 
-        self.serial.send("JOG:LEFT" if direction == "left" else "JOG:RIGHT")
         threading.Thread(target=self._jog_loop, daemon=True).start()
+
 
     def _jog_loop(self) -> None:
         while self.state.jog_active:
-            cmd = "JOG:LEFT" if self.state.jog_direction == "left" else "JOG:RIGHT"
-            self.serial.send(cmd)
-            time.sleep(0.1)
+            direction = self.state.jog_direction
+            direction_cmd = "LEFT" if direction == "left" else "RIGHT"
+
+            # 1.00 mm por pulso mientras se mantiene presionado.
+            cmd = f"JOGMM_X100:{direction_cmd}:100"
+
+            resp = self.serial.send(cmd)
+
+            if resp and any("ERR" in str(x) or "CMD?" in str(x) for x in resp):
+                self.ui.after(
+                    0,
+                    lambda r=resp: self.ui.log(
+                        f"JOG continuo detenido → {r}",
+                        "error",
+                    ),
+                )
+                break
+
+            time.sleep(0.05)
+
+        self.state.jog_active = False
+        self.ui.after(0, self.ui.set_jog_stopped)
+        self.ui.after(
+            0,
+            lambda: self.ui.set_jog_status("◉ PARADO", TEXT_SECONDARY),
+        )
+
 
     def jog_stop(self) -> None:
         self.state.jog_active = False
@@ -572,7 +699,8 @@ class ControlController:
                 self.ui.log("JOG(sim) STOP rechazado", "error")
             return
 
-        self.serial.send("JOG:STOP")
+        # En STM32 actual no hay JOG:STOP; cada JOGMM_X100 es finito.
+        self.ui.log("JOG continuo detenido", "info")
 
     # ---------------------------------------------------------
     # Soporte para sync externo
