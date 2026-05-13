@@ -525,9 +525,20 @@ class App(ctk.CTk):
         ).start()
 
     def _send_config_to_esp(self):
-        cmd = self.config_service.build_controller_config_command(self.cfg)
-        resp = self.serial.send(cmd)
-        self.log(f"CONFIG enviada: {resp}", "ok")
+        comandos = self.config_service.build_stm32_config_commands(self.cfg)
+
+        for cmd in comandos:
+            resp = self.serial.send(cmd)
+
+            tiene_error = bool(
+                resp and any(
+                    "ERR" in str(x) or "CMD?" in str(x)
+                    for x in resp
+                )
+            )
+
+            tag = "error" if tiene_error else "ok"
+            self.log(f"CONFIG STM32 {cmd} → {resp}", tag)
 
     # ── Posición ──────────────────────────────────────────────
     def _on_pos_recipe_change(self, name=None):

@@ -70,3 +70,48 @@ class ConfigService:
             f"CONFIG:esp={esp_x10},retf={retf},"
             f"frenoNO={freno},dirinit={dirinit},vpre={vpre}"
         )
+    
+    def build_stm32_config_commands(self, config: dict[str, Any]) -> list[str]:
+        """
+        Configuración para firmware STM32 actual.
+
+        No mueve el husillo.
+        Solo configura parámetros base y solicita estado.
+        """
+        try:
+            esp_mm = float(config.get("espesor_mm", 1.0))
+        except (TypeError, ValueError):
+            esp_mm = 1.0
+
+        esp_x100 = max(1, int(round(esp_mm * 100)))
+
+        try:
+            jog_delay_us = int(config.get("jog_delay_us", 600))
+        except (TypeError, ValueError):
+            jog_delay_us = 600
+
+        # Mismo rango que firmware STM32.
+        jog_delay_us = max(50, min(5000, jog_delay_us))
+
+        try:
+            husillo_mm_rev = float(config.get("husillo_mm_rev", 16.0))
+        except (TypeError, ValueError):
+            husillo_mm_rev = 16.0
+
+        husillo_x100 = max(1, int(round(husillo_mm_rev * 100)))
+
+        try:
+            steps_rev = int(config.get("steps_rev", 2000))
+        except (TypeError, ValueError):
+            steps_rev = 2000
+
+        steps_rev = max(1, steps_rev)
+
+        return [
+            f"SET_HUSILLO_X100:{husillo_x100}",
+            f"SET_STEPS_REV:{steps_rev}",
+            f"SET_ESP_X100:{esp_x100}",
+            f"SET_JOG_DELAY_US:{jog_delay_us}",
+            "STATUS",
+            "LIMITS",
+        ]
