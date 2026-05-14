@@ -1158,8 +1158,7 @@ class App(ctk.CTk):
     def _restart_app(self):
         project_root = Path(__file__).resolve().parents[1]
         run_script = project_root / "run.py"
-        python_from_venv = Path(sys.prefix) / "Scripts" / "python.exe"
-        python_executable = python_from_venv if python_from_venv.exists() else Path(sys.executable)
+        python_executable = Path(sys.executable)
 
         try:
             self.log_service.session_end("Reinicio solicitado por cambio de tema")

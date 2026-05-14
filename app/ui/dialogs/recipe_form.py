@@ -34,10 +34,7 @@ class RecipeForm(ctk.CTkToplevel):
         self.title("Editor de Receta — Bobinadora HMI v5.3")
         self.geometry("1060x820")
         self.configure(fg_color=APP_BG)
-        self.grab_set()
         self.resizable(True, True)
-        self.lift()
-        self.focus_force()
 
         self.on_save = on_save
         self.editing = recipe is not None
@@ -49,6 +46,24 @@ class RecipeForm(ctk.CTkToplevel):
         self.num_secs = 0
 
         self._build(recipe)
+
+        self.after(100, self._safe_grab)
+
+    def _safe_grab(self):
+        try:
+            if not self.winfo_exists():
+                return
+
+            self.lift()
+            self.focus_force()
+
+            if self.winfo_viewable():
+                self.grab_set()
+            else:
+                self.after(100, self._safe_grab)
+
+        except tk.TclError as e:
+            print(f"[RecipeForm] grab_set omitido: {e}")
 
     def _build(self, recipe):
         hdr = ctk.CTkFrame(
