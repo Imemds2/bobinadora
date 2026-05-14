@@ -192,6 +192,118 @@ class RecipeService:
     def build_run_section_command(self, recipe_name: str, section_index: int) -> str:
         clean_name = str(recipe_name).strip()
         return f"RUN:{clean_name}:SEC:{section_index}"
+    
+    # ---------------------------------------------------------
+    # STM32 / migración desde ESP32
+    # ---------------------------------------------------------
+    def get_espesor_x100(self, recipe: dict[str, Any]) -> int:
+        """
+        La receta actual guarda espesorX10:
+            10 = 1.0 mm
+            25 = 2.5 mm
+
+        La STM32 espera ESP_MM_x100:
+            100 = 1.00 mm
+            250 = 2.50 mm
+        """
+        try:
+            esp_x10 = int(recipe.get("espesorX10", 10))
+        except (TypeError, ValueError):
+            esp_x10 = 10
+
+        return max(1, esp_x10 * 10)
+
+    def section_uses_husillo(self, section: dict[str, Any]) -> bool:
+        """
+        Regla mínima, sin rediseñar recetas:
+
+        - Si en el futuro una sección trae usar_husillo explícito,
+          respetamos ese valor.
+        - Si no existe, inferimos:
+            BOB = usa husillo
+            BAR / LAM / otros = no usa husillo
+        """
+        if "usar_husillo" in section:
+            return bool(section.get("usar_husillo"))
+
+        tipo = str(section.get("tipo", "BOB")).strip().upper()
+        return tipo == "BOB"
+
+    def recipe_uses_husillo(self, recipe: dict[str, Any]) -> bool:
+        """
+        La receta usa husillo si al menos una sección requiere avance automático.
+        """
+        return any(
+            self.section_uses_husillo(sec)
+            for sec in recipe.get("secciones", [])
+        )
+
+    def build_stm32_recipe_prepare_commands(
+        self,
+        recipe: dict[str, Any],
+    ) -> list[tuple[str, str]]:
+        """
+        Reemplazo mínimo para cargar receta en STM32.
+
+        Importante:
+        Esto NO mueve el husillo.
+        Solo configura valores operativos.
+        """
+        esp_x100 = self.get_espesor_x100(recipe)
+
+        return [
+            ("ESPESOR", f"SET_ESP_X100:{esp_x100}"),
+            ("STATUS", "STATUS"),
+            ("LIMITS", "LIMITS"),
+        ]
+
+    def build_stm32_run_commands(
+        self,
+        recipe: dict[str, Any],
+    ) -> list[tuple[str, str]]:
+        """
+        START lógico para STM32.
+
+        No arranca mandril.
+        Solo arma sincronización del husillo si aplica.
+        """
+        if self.recipe_uses_husillo(recipe):
+            return [
+                ("SYNC HUSILLO", "SYNC_ON"),
+            ]
+
+        return [
+            ("HUSILLO OFF", "SYNC_OFF"),
+        ]
+
+    def build_stm32_run_section_commands(
+        self,
+        recipe: dict[str, Any],
+        section_index: int,
+    ) -> list[tuple[str, str]]:
+        """
+        Inicio lógico de sección para STM32.
+
+        Por ahora no hay motor/variador integrado.
+        Solo activamos o desactivamos SYNC según la sección.
+        """
+        secciones = recipe.get("secciones", [])
+
+        if section_index < 0 or section_index >= len(secciones):
+            return [
+                ("ERROR", "STATUS"),
+            ]
+
+        section = secciones[section_index]
+
+        if self.section_uses_husillo(section):
+            return [
+                ("SYNC HUSILLO", "SYNC_ON"),
+            ]
+
+        return [
+            ("HUSILLO OFF", "SYNC_OFF"),
+        ]
 
     # ---------------------------------------------------------
     # Posición / reanudación

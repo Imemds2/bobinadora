@@ -678,26 +678,44 @@ class App(ctk.CTk):
             time.sleep(0.3)
 
             if position_data.pulses > 0:
-                resp = self.serial.send(f"SETENC:{position_data.pulses}")
                 self.log(
-                    f"SETENC {position_data.pulses} pulsos ({current_turns:.1f}v): {resp}",
-                    "info",
+                    "Reanudación desde vuelta distinta de 0 pendiente en STM32: "
+                    "requiere comando SET_ENCODER_COUNT / SET_POS.",
+                    "error",
                 )
-                time.sleep(0.15)
-            else:
-                self.log("Vuelta 0 — encoder en 0", "info")
-
-            sec_idx = sec_num - 1
-            run_cmd = self.recipe_service.build_run_section_command(rec_name, sec_idx)
-            resp = self.serial.send(run_cmd)
-            self.log(f"RUN S{sec_num}: {resp}", "ok")
-
-            if resp and any("ERR" in x for x in resp):
                 self.after(
                     0,
-                    lambda: messagebox.showerror(
+                    lambda: messagebox.showwarning(
+                        "Pendiente STM32",
+                        "La reanudación desde una vuelta acumulada distinta de 0 "
+                        "todavía no está implementada en el firmware STM32.\n\n"
+                        "Por ahora inicia desde vuelta 0 o ejecuta HOMING."
+                    )
+                )
+                return
+
+            self.log("Vuelta 0 — posición lógica en 0", "info")
+
+            sec_idx = sec_num - 1
+            commands = self.recipe_service.build_stm32_run_section_commands(recipe, sec_idx)
+
+            has_error = False
+            last_response = None
+
+            for label, command in commands:
+                resp = self.serial.send(command)
+                self.log(f"RUN S{sec_num} STM32 {label}: {command} → {resp}", "ok")
+                last_response = resp
+
+                if resp and any("ERR" in str(x) or "CMD?" in str(x) for x in resp):
+                    has_error = True
+
+            if has_error:
+                self.after(
+                    0,
+                    lambda r=last_response: messagebox.showerror(
                         "Error",
-                        f"Controlador rechazó RUN:\n{resp}",
+                        f"Controlador rechazó RUN S{sec_num} STM32:\n{r}",
                     )
                 )
                 return
@@ -827,29 +845,35 @@ class App(ctk.CTk):
 
     def _send_recipe_thread(self, recipe):
         nombre = self.recipe_service.get_recipe_display_name(recipe)
-        self.log(f"── Enviando '{nombre}' ──", "info")
+        usa_husillo = self.recipe_service.recipe_uses_husillo(recipe)
 
-        self.serial.send("STATUSPAUSE")
-        time.sleep(0.1)
+        self.log(f"── Preparando '{nombre}' en STM32 ──", "info")
+        self.log(
+            "Modo receta: CON HUSILLO" if usa_husillo else "Modo receta: SOLO MANDRIL / SIN HUSILLO",
+            "info",
+        )
 
-        commands = self.recipe_service.build_recipe_upload_commands(recipe)
+        commands = self.recipe_service.build_stm32_recipe_prepare_commands(recipe)
 
+        has_error = False
         last_response = None
+
         for label, command in commands:
             response = self.serial.send(command)
-            self.log(f"  {label}: {response}")
+            self.log(f"  {label}: {command} → {response}")
             last_response = response
 
-        self.serial.send("STATUSRESUME")
+            if response and any("ERR" in str(x) or "CMD?" in str(x) for x in response):
+                has_error = True
 
-        if last_response and any("ERR" in x for x in last_response):
+        if has_error:
             self.log(
-                f"✗ El controlador rechazó la receta: {last_response}",
+                f"✗ STM32 rechazó configuración de receta: {last_response}",
                 "error",
             )
         else:
             self.log(
-                f"✓ '{nombre}' cargada en controlador",
+                f"✓ '{nombre}' preparada en STM32",
                 "ok",
             )
 
@@ -882,16 +906,25 @@ class App(ctk.CTk):
             self._send_recipe_thread(recipe)
             time.sleep(0.3)
 
-            run_cmd = self.recipe_service.build_run_command(name)
-            resp = self.serial.send(run_cmd)
-            self.log(f"RUN '{name}': {resp}", "ok")
+            commands = self.recipe_service.build_stm32_run_commands(recipe)
 
-            if resp and any("ERR" in x for x in resp):
+            has_error = False
+            last_response = None
+
+            for label, command in commands:
+                resp = self.serial.send(command)
+                self.log(f"RUN STM32 {label}: {command} → {resp}", "ok")
+                last_response = resp
+
+                if resp and any("ERR" in str(x) or "CMD?" in str(x) for x in resp):
+                    has_error = True
+
+            if has_error:
                 self.after(
                     0,
-                    lambda: messagebox.showerror(
+                    lambda r=last_response: messagebox.showerror(
                         "Error",
-                        f"Controlador rechazó RUN:\n{resp}",
+                        f"Controlador rechazó RUN STM32:\n{r}",
                     )
                 )
                 return
