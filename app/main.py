@@ -78,8 +78,16 @@ class App(ctk.CTk):
         )
 
         self.connected            = False
+        self.status_poll_job = None
+        self.status_poll_busy = False
+        self.status_poll_interval_ms = 500
         self.current_recipe       = None
         self.selected_recipe_name = None
+        self.current_runtime_recipe = None
+        self.current_runtime_recipe_name = ""
+        self.current_runtime_section_index = 0
+        self.current_runtime_vt_base_x100 = 0
+        self.last_stm32_vt_x100 = 0
         self._manual_activo       = False
 
         self.esp_estado   = tk.StringVar(value="IDLE")
@@ -537,8 +545,14 @@ class App(ctk.CTk):
                 )
             )
 
+            if resp:
+                for line in resp:
+                    if isinstance(line, str) and line.startswith("STATUS:"):
+                        self.after(0, lambda m=line: self._parse_status(m))
+
             tag = "error" if tiene_error else "ok"
             self.log(f"CONFIG STM32 {cmd} → {resp}", tag)
+        self.after(0, self._start_status_polling)
 
     # ── Posición ──────────────────────────────────────────────
     def _on_pos_recipe_change(self, name=None):
@@ -872,6 +886,16 @@ class App(ctk.CTk):
                 "error",
             )
         else:
+            self.after(
+                0,
+                lambda r=recipe, n=nombre: self._set_runtime_recipe(
+                    r,
+                    n,
+                    section_index=0,
+                    reset_baseline=False,
+                ),
+            )
+
             self.log(
                 f"✓ '{nombre}' preparada en STM32",
                 "ok",
@@ -905,6 +929,16 @@ class App(ctk.CTk):
             self.log(f"=== CARGANDO '{name}' ===", "info")
             self._send_recipe_thread(recipe)
             time.sleep(0.3)
+
+            self.after(
+                0,
+                lambda r=recipe, n=name: self._set_runtime_recipe(
+                    r,
+                    n,
+                    section_index=0,
+                    reset_baseline=True,
+                ),
+            )
 
             commands = self.recipe_service.build_stm32_run_commands(recipe)
 
@@ -1054,34 +1088,156 @@ class App(ctk.CTk):
             text_color=color,
         )
 
+    def _safe_int_value(self, value, default=0):
+        try:
+            if value in ("", None, "--"):
+                return default
+            return int(float(value))
+        except Exception:
+            return default
+
+    def _set_runtime_recipe(
+        self,
+        recipe,
+        name: str | None = None,
+        section_index: int = 0,
+        reset_baseline: bool = False,
+    ):
+        if not recipe:
+            return
+
+        clean_name = name or self.recipe_service.get_recipe_display_name(recipe)
+
+        self.current_runtime_recipe = recipe
+        self.current_runtime_recipe_name = clean_name
+        self.current_runtime_section_index = max(0, int(section_index or 0))
+
+        if reset_baseline:
+            self.current_runtime_vt_base_x100 = self.last_stm32_vt_x100
+
+        secciones = recipe.get("secciones", [])
+        total_sections = len(secciones)
+
+        self.esp_rec.set(clean_name or "--")
+        self.esp_sec.set(str(self.current_runtime_section_index + 1) if total_sections else "--")
+        self.esp_tsec.set(str(total_sections) if total_sections else "--")
+
+        if hasattr(self.machine, "snapshot"):
+            self.machine.snapshot.recipe_name = clean_name
+            self.machine.snapshot.current_layer = 1
+            self.machine.snapshot.target_turns = 0.0
+
+    def _get_runtime_layer_info(self, turns: float) -> dict:
+        recipe = self.current_runtime_recipe
+        if not recipe:
+            return {}
+
+        secciones = recipe.get("secciones", [])
+        if not secciones:
+            return {}
+
+        sec_idx = self.current_runtime_section_index
+        if sec_idx < 0 or sec_idx >= len(secciones):
+            sec_idx = 0
+
+        sec = secciones[sec_idx]
+        capas = sec.get("capas", [])
+
+        if not capas:
+            return {
+                "section": str(sec_idx + 1),
+                "total_sections": str(len(secciones)),
+                "layer": "--",
+                "total_layers": "--",
+                "target": "--",
+                "turns": f"{turns:.2f}",
+            }
+
+        layer_idx = 0
+        for idx, meta in enumerate(capas):
+            if turns <= float(meta):
+                layer_idx = idx
+                break
+        else:
+            layer_idx = len(capas) - 1
+
+        target = float(capas[layer_idx])
+
+        return {
+            "section": str(sec_idx + 1),
+            "total_sections": str(len(secciones)),
+            "layer": str(layer_idx + 1),
+            "total_layers": str(len(capas)),
+            "target": f"{target:.1f}",
+            "turns": f"{turns:.2f}",
+            "section_name": sec.get("nombre", ""),
+            "section_type": sec.get("tipo", "BOB"),
+        }
+
+    def _apply_runtime_recipe_display(self, status):
+        """
+        Combina:
+        - receta local Python
+        - VT_x100 de STM32
+
+        para pintar panel izquierdo como antes.
+        """
+        raw_vt_x100 = self._safe_int_value(getattr(status, "turns_x100", "0"), 0)
+        self.last_stm32_vt_x100 = raw_vt_x100
+
+        if not self.current_runtime_recipe:
+            return False
+
+        relative_x100 = raw_vt_x100 - self.current_runtime_vt_base_x100
+
+        # Para avance de receta usamos magnitud de vueltas.
+        # El signo del encoder depende del sentido físico.
+        turns = abs(relative_x100) / 100.0
+
+        info = self._get_runtime_layer_info(turns)
+        if not info:
+            return False
+
+        recipe_name = self.current_runtime_recipe_name or "--"
+
+        self.esp_rec.set(recipe_name)
+        self.esp_sec.set(info.get("section", "--"))
+        self.esp_tsec.set(info.get("total_sections", "--"))
+        self.esp_capa.set(info.get("layer", "--"))
+        self.esp_tcap.set(info.get("total_layers", "--"))
+        self.esp_meta.set(info.get("target", "--"))
+        self.esp_vueltas.set(info.get("turns", "0.00"))
+
+        if hasattr(self.machine, "snapshot"):
+            snap = self.machine.snapshot
+            snap.recipe_name = recipe_name
+            snap.current_turns = turns
+            snap.current_layer = self._safe_int_value(info.get("layer", "0"), 0)
+            snap.target_turns = float(info.get("target", "0") or 0)
+
+        return True
+
     def _parse_status(self, msg):
         status = self.status_service.parse_status_ui_data(msg)
         if not status:
             return
-        
+
         if hasattr(self.machine, "apply_status_ui_data"):
             self.machine.apply_status_ui_data(status)
 
+        # Estado máquina siempre viene de STM32.
         self.after(0, lambda s=status.estado_texto: self.esp_estado.set(s))
 
-        if status.recipe_name:
-            self.after(0, lambda v=status.recipe_name: self.esp_rec.set(v))
-        if status.section:
-            self.after(0, lambda v=status.section: self.esp_sec.set(v))
-        if status.total_sections:
-            self.after(0, lambda v=status.total_sections: self.esp_tsec.set(v))
-        if status.total_layers:
-            self.after(0, lambda v=status.total_layers: self.esp_tcap.set(v))
-        if status.target_turns:
-            self.after(0, lambda v=status.target_turns: self.esp_meta.set(v))
-        if status.current_turns:
+        # Datos base STM32.
+        if status.current_turns and not self.current_runtime_recipe:
             self.after(0, lambda v=status.current_turns: self.esp_vueltas.set(v))
+
         if status.rpm:
             self.after(0, lambda v=status.rpm: self.esp_rpm.set(v))
+
         if status.position_cm:
             self.after(0, lambda v=status.position_cm: self.esp_pos.set(v))
 
-        self.after(0, lambda v=status.layer_display: self.esp_capa.set(v))
         self.after(0, lambda v=status.brake_text: self.esp_freno.set(v))
         self.after(0, lambda v=status.motor_text: self.esp_variador.set(v))
         self.after(0, lambda m=status.is_manual: self._sync_manual_btn(m))
@@ -1098,39 +1254,128 @@ class App(ctk.CTk):
                     lambda v=status.position_label: self.jog_pos_label.configure(text=v),
                 )
 
+        # Si hay receta local activa, ella manda sobre REC/SEC/CAPA/META.
+        runtime_applied = self._apply_runtime_recipe_display(status)
+
+        if not runtime_applied:
+            # Solo usamos datos del STATUS si no son genéricos STM32.
+            recipe_name = str(status.recipe_name or "").strip()
+
+            if recipe_name and recipe_name.lower() not in ("stm32", "ninguna", "none"):
+                self.after(0, lambda v=recipe_name: self.esp_rec.set(v))
+
+                if hasattr(self, "control_tab") and self.control_tab:
+                    self.after(
+                        0,
+                        lambda n=recipe_name: self.control_tab.set_selected_run_recipe(n),
+                    )
+                else:
+                    self.after(0, lambda n=recipe_name: self.run_recipe_var.set(n))
+
+            if status.section:
+                self.after(0, lambda v=status.section: self.esp_sec.set(v))
+            if status.total_sections:
+                self.after(0, lambda v=status.total_sections: self.esp_tsec.set(v))
+            if status.total_layers:
+                self.after(0, lambda v=status.total_layers: self.esp_tcap.set(v))
+            if status.target_turns:
+                self.after(0, lambda v=status.target_turns: self.esp_meta.set(v))
+
+            self.after(0, lambda v=status.layer_display: self.esp_capa.set(v))
+
         if status.alert_text and status.alert_color:
             self.after(
                 0,
                 lambda t=status.alert_text, c=status.alert_color: self._show_alert(t, c),
             )
 
-        if status.recipe_name and status.recipe_name != "ninguna":
-            if hasattr(self, "control_tab") and self.control_tab:
-                self.after(
-                    0,
-                    lambda n=status.recipe_name: self.control_tab.set_selected_run_recipe(n)
-                )
-            else:
-                self.after(0, lambda n=status.recipe_name: self.run_recipe_var.set(n))
+    def _start_status_polling(self):
+        if self.use_simulator:
+            return
+
+        self._stop_status_polling()
+        self.status_poll_job = self.after(
+            self.status_poll_interval_ms,
+            self._poll_status_once,
+        )
+
+    def _stop_status_polling(self):
+        if self.status_poll_job is not None:
+            try:
+                self.after_cancel(self.status_poll_job)
+            except Exception:
+                pass
+
+        self.status_poll_job = None
+        self.status_poll_busy = False
+
+    def _poll_status_once(self):
+        if not self.connected or self.use_simulator:
+            self.status_poll_job = None
+            self.status_poll_busy = False
+            return
+
+        if self.status_poll_busy:
+            self.status_poll_job = self.after(
+                self.status_poll_interval_ms,
+                self._poll_status_once,
+            )
+            return
+
+        self.status_poll_busy = True
+
+        def _worker():
+            try:
+                resp = self.serial.send("STATUS", timeout_ms=250)
+
+                if resp:
+                    for line in resp:
+                        if isinstance(line, str) and line.startswith("STATUS:"):
+                            self.after(0, lambda m=line: self._parse_status(m))
+
+            except Exception as e:
+                self.after(0, lambda: self.log(f"STATUS polling error: {e}", "error"))
+
+            finally:
+                def _schedule_next():
+                    self.status_poll_busy = False
+
+                    if self.connected and not self.use_simulator:
+                        self.status_poll_job = self.after(
+                            self.status_poll_interval_ms,
+                            self._poll_status_once,
+                        )
+
+                self.after(0, _schedule_next)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def on_connection_change(self, connected, info):
+        already_connected = self.connected and connected
+
         self.connected = connected
         self.app_state.connected = connected
 
-        if not connected and hasattr(self.machine, "mark_disconnected"):
-            self.machine.mark_disconnected()
+        if already_connected:
+            return
 
-        if self.control_controller:
+        if not connected:
+            self._stop_status_polling()
+
+            if hasattr(self.machine, "mark_disconnected"):
+                self.machine.mark_disconnected()
+
+            if hasattr(self, "control_controller"):
+                self.control_controller.sync_connection(connected, info)
+
+            return
+
+        if hasattr(self, "control_controller"):
             self.control_controller.sync_connection(connected, info)
 
         if connected and not self.use_simulator:
-            threading.Thread(
-                target=lambda: (
-                    time.sleep(1.5),
-                    self._send_config_to_esp(),
-                ),
-                daemon=True,
-            ).start()
+            self._stop_status_polling()
+            self._enviar_config_esp()
 
     def _toggle_connect(self):
         self.control_controller.toggle_connect()

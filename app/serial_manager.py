@@ -145,7 +145,32 @@ class SerialManager:
         except Exception:
             return False
 
+    def _resolve_timeout_ms(self, cmd: str, timeout_ms: int) -> int:
+        """
+        Algunos comandos tardan más porque la STM32 ejecuta movimiento físico.
+        Si dejamos 500 ms, la respuesta llega después y puede mezclarse con STATUS.
+        """
+        clean = str(cmd or "").strip().upper()
+
+        if clean.startswith("HOMING"):
+            return max(timeout_ms, 120000)
+
+        if clean.startswith("JOGMM_X100"):
+            return max(timeout_ms, 60000)
+
+        if clean.startswith("STOP"):
+            return max(timeout_ms, 1500)
+
+        if clean.startswith("SYNC_RESET"):
+            return max(timeout_ms, 1500)
+
+        if clean.startswith("SYNC_ON") or clean.startswith("SYNC_OFF"):
+            return max(timeout_ms, 1500)
+
+        return timeout_ms
+
     def send(self, cmd: str, timeout_ms: int = 500) -> list:
+        timeout_ms = self._resolve_timeout_ms(cmd, timeout_ms)
         """
         Envía un comando y espera respuesta.
 
