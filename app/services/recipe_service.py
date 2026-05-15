@@ -35,6 +35,26 @@ class SectionPositionData:
     pulses: int
     next_derivation_text: str = ""
 
+@dataclass
+class RuntimeRecipeEvent:
+    section_index: int
+    section_number: int
+    section_name: str
+    section_type: str
+
+    event_type: str
+    turns: float
+    vt_x100: int
+
+    layer_index: int = 0
+    layer_number: int = 0
+
+    direction: str = "RIGHT"
+    uses_husillo: bool = False
+
+    etiqueta: str = ""
+    mensaje: str = ""
+    label: str = ""
 
 class RecipeService:
     """
@@ -304,6 +324,152 @@ class RecipeService:
         return [
             ("HUSILLO OFF", "SYNC_OFF"),
         ]
+    
+    # ---------------------------------------------------------
+    # Plan de ejecución / eventos de receta
+    # ---------------------------------------------------------
+    def build_runtime_plan(self, recipe: dict[str, Any]) -> list[RuntimeRecipeEvent]:
+        """
+        Construye el plan completo de eventos de la receta.
+
+        Importante:
+        Los eventos se manejan por sección. Las vueltas de cada sección son
+        relativas a esa sección, igual que en el JSON actual.
+        """
+        events: list[RuntimeRecipeEvent] = []
+
+        for section_index, section in enumerate(recipe.get("secciones", [])):
+            events.extend(
+                self.build_section_runtime_events(
+                    recipe,
+                    section_index,
+                )
+            )
+
+        return events
+
+    def build_section_runtime_events(
+        self,
+        recipe: dict[str, Any],
+        section_index: int,
+    ) -> list[RuntimeRecipeEvent]:
+        secciones = recipe.get("secciones", [])
+
+        if section_index < 0 or section_index >= len(secciones):
+            return []
+
+        sec = secciones[section_index]
+
+        section_number = section_index + 1
+        section_name = str(sec.get("nombre", "")).strip()
+        section_type = str(sec.get("tipo", "BOB")).strip().upper()
+        uses_husillo = self.section_uses_husillo(sec)
+
+        capas = sec.get("capas", [])
+        dirs = sec.get("dirs", [True] * len(capas))
+
+        events: list[RuntimeRecipeEvent] = []
+
+        # Eventos de fin de capa / barrera
+        for layer_index, meta in enumerate(capas):
+            try:
+                turns = float(meta)
+            except (TypeError, ValueError):
+                continue
+
+            dir_bool = dirs[layer_index] if layer_index < len(dirs) else True
+            direction = "RIGHT" if dir_bool else "LEFT"
+
+            if section_type == "BAR":
+                event_type = "BARRIER"
+                label = f"S{section_number} {section_name} — BARRERA @{turns:.2f}v"
+            else:
+                event_type = "LAYER_END"
+                label = (
+                    f"S{section_number} {section_name} — "
+                    f"FIN CAPA {layer_index + 1} @{turns:.2f}v"
+                )
+
+            events.append(
+                RuntimeRecipeEvent(
+                    section_index=section_index,
+                    section_number=section_number,
+                    section_name=section_name,
+                    section_type=section_type,
+                    event_type=event_type,
+                    turns=turns,
+                    vt_x100=int(round(turns * 100)),
+                    layer_index=layer_index,
+                    layer_number=layer_index + 1,
+                    direction=direction,
+                    uses_husillo=uses_husillo,
+                    label=label,
+                )
+            )
+
+        # Eventos de derivación / taps
+        for derivacion in sec.get("derivaciones", []):
+            try:
+                turns = float(derivacion.get("vuelta", 0))
+            except (TypeError, ValueError):
+                continue
+
+            layer_index = self._find_layer_index(capas, turns) if capas else 0
+            dir_bool = dirs[layer_index] if layer_index < len(dirs) else True
+            direction = "RIGHT" if dir_bool else "LEFT"
+
+            etiqueta = str(derivacion.get("etiqueta", "")).strip()
+            mensaje = str(derivacion.get("mensaje", "")).strip()
+
+            label = (
+                f"S{section_number} {section_name} — "
+                f"DERIVACIÓN {etiqueta} @{turns:.2f}v"
+            )
+
+            if mensaje:
+                label += f" → {mensaje}"
+
+            events.append(
+                RuntimeRecipeEvent(
+                    section_index=section_index,
+                    section_number=section_number,
+                    section_name=section_name,
+                    section_type=section_type,
+                    event_type="DERIVATION",
+                    turns=turns,
+                    vt_x100=int(round(turns * 100)),
+                    layer_index=layer_index,
+                    layer_number=layer_index + 1,
+                    direction=direction,
+                    uses_husillo=uses_husillo,
+                    etiqueta=etiqueta,
+                    mensaje=mensaje,
+                    label=label,
+                )
+            )
+
+        return sorted(
+            events,
+            key=lambda e: (
+                e.vt_x100,
+                self._runtime_event_priority(e.event_type),
+            )
+        )
+
+    def _runtime_event_priority(self, event_type: str) -> int:
+        """
+        Si dos eventos caen en la misma vuelta:
+        - Primero derivación.
+        - Luego barrera.
+        - Luego fin de capa.
+        """
+        priorities = {
+            "DERIVATION": 10,
+            "BARRIER": 20,
+            "LAYER_END": 30,
+        }
+
+        return priorities.get(str(event_type).upper(), 99)
 
     # ---------------------------------------------------------
     # Posición / reanudación
