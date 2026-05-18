@@ -46,7 +46,6 @@ class StatusUiData:
     alert_text: Optional[str] = None
     alert_color: Optional[str] = None
 
-    # Campos nuevos para STM32
     state_machine: str = ""
     sync: str = "0"
     encoder_count: str = ""
@@ -66,6 +65,17 @@ class StatusUiData:
     block: str = "0"
     is_home_ok: bool = False
     is_limit_blocked: bool = False
+    
+    # Target / receta STM32
+    sync_dir: str = "AUTO"
+    vt_abs_x100: str = ""
+    vt_abs_display: str = ""
+    target_on: str = "0"
+    target_vt_x100: str = "0"
+    target_vt_display: str = "0.00"
+    target_reached: str = "0"
+    pause_reason: str = "NONE"
+    is_paused_target: bool = False
 
 
 class StatusService:
@@ -82,6 +92,9 @@ class StatusService:
     def classify_message_tag(self, msg: str) -> str:
         if not msg:
             return "normal"
+        
+        if "PAUSE_TARGET" in msg:
+            return "pause"
 
         if "ERR" in msg:
             return "error"
@@ -137,6 +150,20 @@ class StatusService:
                 log_tag=tag,
                 alert_text=msg,
                 alert_color=ACCENT_RED,
+            )
+        
+        if "PAUSE_TARGET" in msg:
+            reason = self._extract_pause_target_reason(msg)
+            vt = self._extract_field(msg, "VT_ABS_x100")
+            target = self._extract_field(msg, "TARGET_VT_x100")
+
+            vt_txt = self._fmt_x100(vt) if vt else "?"
+            target_txt = self._fmt_x100(target) if target else "?"
+
+            return MessageUiEffect(
+                log_tag=tag,
+                alert_text=f"⏸ PAUSA {reason} — {vt_txt}v / objetivo {target_txt}v",
+                alert_color=ACCENT_YELLOW,
             )
 
         if "OK:HOMING:DONE" in msg:
@@ -227,6 +254,113 @@ class StatusService:
     # ---------------------------------------------------------
 
     def _parse_stm32_status(self, data: dict) -> StatusUiData:
+        state = data.get("STATE", data.get("_estado", "UNKNOWN"))
+        estado_texto = self._machine_state_text(state)
+
+        sync = data.get("SYNC", "0")
+        sync_dir = data.get("SYNC_DIR", "AUTO")
+
+        enc = data.get("ENC", "0")
+        vt_x100 = data.get("VT_x100", "0")
+        vt_abs_x100 = data.get("VT_ABS_x100", "")
+
+        turns_display = self._fmt_x100(vt_x100)
+        vt_abs_display = self._fmt_x100(vt_abs_x100) if vt_abs_x100 != "" else turns_display
+
+        target_on = data.get("TARGET_ON", "0")
+        target_vt_x100 = data.get("TARGET_VT_x100", "0")
+        target_vt_display = self._fmt_x100(target_vt_x100)
+        target_reached = data.get("TARGET_REACHED", "0")
+        pause_reason = data.get("PAUSE_REASON", "NONE")
+
+        pos_steps = data.get("POS", "0")
+        pos_mm_x100 = data.get("POS_MM_x100", "0")
+        pos_mm = self._fmt_x100(pos_mm_x100)
+
+        esp_x100 = data.get("ESP_MM_x100", "")
+        esp_mm = self._fmt_x100(esp_x100) if esp_x100 != "" else ""
+
+        gear = data.get("GEAR", "")
+        jog_delay = data.get("JOG_DELAY_US", "")
+        lim_min = data.get("LIM_MIN", "0")
+        lim_max = data.get("LIM_MAX", "0")
+        can_left = data.get("CAN_LEFT", "1")
+        can_right = data.get("CAN_RIGHT", "1")
+        block = data.get("BLOCK", "0")
+
+        alert_text, alert_color = self._status_alert_for_machine_state(data)
+
+        is_manual = state in ("MANUAL", "JOG_LEFT", "JOG_RIGHT")
+        is_home_ok = state == "HOME_OK"
+        is_limit_blocked = state == "LIMIT_BLOCKED" or block in ("1", "2")
+        is_paused_target = state == "PAUSED_TARGET" or target_reached == "1"
+
+        if block == "1":
+            brake_text = "⛔ Bloqueado por HOME/MIN"
+        elif block == "2":
+            brake_text = "⛔ Bloqueado por FINAL/MAX"
+        else:
+            brake_text = "✓ Límites OK"
+
+        if is_paused_target:
+            motor_text = f"⏸ Pausa: {pause_reason}"
+        elif sync == "1":
+            motor_text = f"SYNC activo {sync_dir}"
+        else:
+            motor_text = "SYNC apagado"
+
+        return StatusUiData(
+            raw=data,
+            estado_num=state,
+            estado_texto=estado_texto,
+
+            recipe_name=data.get("REC", "STM32"),
+            section=data.get("SEC", ""),
+            total_sections=data.get("TSEC", ""),
+            layer_display=data.get("CAPA", "--"),
+            total_layers=data.get("TCAP", ""),
+            target_turns=target_vt_display if target_on == "1" else data.get("META", ""),
+            current_turns=vt_abs_display,
+            rpm=data.get("RPM", ""),
+            position_cm=f"{pos_mm} mm",
+            position_label=f"Pos: {pos_mm} mm",
+            brake_text=brake_text,
+            motor_text=motor_text,
+
+            is_manual=is_manual,
+            alert_text=alert_text,
+            alert_color=alert_color,
+
+            state_machine=state,
+            sync=sync,
+            encoder_count=enc,
+            turns_x100=vt_x100,
+            turns_display=turns_display,
+            position_steps=pos_steps,
+            position_mm_x100=pos_mm_x100,
+            position_mm=pos_mm,
+            esp_mm_x100=esp_x100,
+            esp_mm=esp_mm,
+            gear=gear,
+            jog_delay_us=jog_delay,
+            lim_min=lim_min,
+            lim_max=lim_max,
+            can_left=can_left,
+            can_right=can_right,
+            block=block,
+            is_home_ok=is_home_ok,
+            is_limit_blocked=is_limit_blocked,
+
+            sync_dir=sync_dir,
+            vt_abs_x100=vt_abs_x100,
+            vt_abs_display=vt_abs_display,
+            target_on=target_on,
+            target_vt_x100=target_vt_x100,
+            target_vt_display=target_vt_display,
+            target_reached=target_reached,
+            pause_reason=pause_reason,
+            is_paused_target=is_paused_target,
+        )
         state = data.get("STATE", data.get("_estado", "UNKNOWN"))
         estado_texto = self._machine_state_text(state)
 
@@ -406,6 +540,7 @@ class StatusService:
             "HOME_OK": "Home OK",
             "HOMING_ERROR": "Error de homing",
             "UNKNOWN": "Estado desconocido",
+            "PAUSED_TARGET": "Pausa por objetivo",
         }
         return textos.get(state, state)
 
@@ -418,6 +553,21 @@ class StatusService:
 
         if state == "HOME_OK":
             return "⌂ HOME OK — posición cero validada", ACCENT_GREEN
+        
+        if state == "PAUSED_TARGET" or data.get("TARGET_REACHED", "0") == "1":
+            reason = data.get("PAUSE_REASON", "TARGET")
+            vt = self._fmt_x100(data.get("VT_ABS_x100", "0"))
+            target = self._fmt_x100(data.get("TARGET_VT_x100", "0"))
+
+            labels = {
+                "BARRIER": "BARRERA",
+                "LAYER_END": "FIN DE CAPA",
+                "DERIVATION": "DERIVACIÓN",
+                "SECTION_END": "FIN DE SECCIÓN",
+            }
+
+            reason_label = labels.get(reason, reason)
+            return f"⏸ {reason_label} — {vt}v / objetivo {target}v", ACCENT_YELLOW
 
         if state == "HOMING":
             return "⌂ HOMING en progreso...", ACCENT_ORANGE
@@ -480,6 +630,23 @@ class StatusService:
             if part == "NEXT_NOMBRE" and i + 1 < len(parts):
                 return parts[i + 1]
         return "?"
+    
+    def _extract_field(self, msg: str, field: str) -> str:
+        parts = msg.split(":")
+        for i, part in enumerate(parts):
+            if part == field and i + 1 < len(parts):
+                return parts[i + 1]
+        return ""
+
+    def _extract_pause_target_reason(self, msg: str) -> str:
+        reason = self._extract_field(msg, "REASON")
+        labels = {
+            "BARRIER": "BARRERA",
+            "LAYER_END": "FIN DE CAPA",
+            "DERIVATION": "DERIVACIÓN",
+            "SECTION_END": "FIN DE SECCIÓN",
+        }
+        return labels.get(reason, reason or "OBJETIVO")
 
     def _status_alert_for_state(self, estado_num: str) -> tuple[Optional[str], Optional[str]]:
         alertas = {
