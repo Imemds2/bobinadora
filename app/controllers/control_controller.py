@@ -55,6 +55,7 @@ class ControlUiHooks:
     set_position: Callable[[str], None]
     set_brake_status: Callable[[str], None]
     set_motor_status: Callable[[str], None]
+    start_runtime_event: Callable[[], bool] | None = None
 
 
 class ControlController:
@@ -325,6 +326,43 @@ class ControlController:
     # Comandos principales
     # ---------------------------------------------------------
     def cmd_start(self) -> None:
+        if not self._ensure_connected():
+            return
+
+        if self.use_simulator:
+            target_turns = 10.0
+            recipe_name = self.ui.get_run_recipe_name().strip() or "RECETA_SIMULADA"
+
+            ok = self.machine.start_job(
+                target_turns=target_turns,
+                recipe_name=recipe_name,
+                use_husillo=True,
+            )
+
+            if ok:
+                self.ui.log(
+                    f"START(sim) → receta={recipe_name}, meta={target_turns}",
+                    "ok",
+                )
+            else:
+                self.ui.log("START(sim) rechazado", "error")
+                self.ui.show_warning(
+                    "Aviso",
+                    "El simulador no aceptó START en el estado actual.",
+                )
+            return
+
+        if self.ui.start_runtime_event is not None:
+            handled = self.ui.start_runtime_event()
+            if handled:
+                return
+
+        self.ui.show_warning(
+            "START",
+            "No hay evento de receta preparado.\n\n"
+            "Carga o ejecuta una receta antes de presionar START."
+        )
+        self.ui.log("START ignorado: no hay evento de receta preparado", "error")
         if not self._ensure_connected():
             return
 

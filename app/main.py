@@ -88,6 +88,11 @@ class App(ctk.CTk):
         self.current_runtime_section_index = 0
         self.current_runtime_vt_base_x100 = 0
         self.last_stm32_vt_x100 = 0
+        self.current_runtime_events = []
+        self.current_runtime_event_index = 0
+        self.current_runtime_active_event = None
+        self.current_runtime_waiting_pause = False
+        self.current_runtime_completed = False
         self._manual_activo       = False
 
         self.esp_estado   = tk.StringVar(value="IDLE")
@@ -405,6 +410,7 @@ class App(ctk.CTk):
             set_position=lambda value: self.esp_pos.set(value),
             set_brake_status=lambda value: self.esp_freno.set(value),
             set_motor_status=lambda value: self.esp_variador.set(value),
+            start_runtime_event=lambda: self._start_next_runtime_event(),
         )
 
         self.control_controller = ControlController(
@@ -885,21 +891,18 @@ class App(ctk.CTk):
                 f"✗ STM32 rechazó configuración de receta: {last_response}",
                 "error",
             )
+            return False
         else:
             self.after(
                 0,
-                lambda r=recipe, n=nombre: self._set_runtime_recipe(
-                    r,
-                    n,
-                    section_index=0,
-                    reset_baseline=False,
-                ),
+                lambda r=recipe, n=nombre: self._prepare_runtime_plan(r, n),
             )
 
             self.log(
                 f"✓ '{nombre}' preparada en STM32",
                 "ok",
             )
+            return True
 
     def _run_selected_recipe(self):
         name = self.run_recipe_var.get()
@@ -918,57 +921,26 @@ class App(ctk.CTk):
 
         if not messagebox.askyesno(
             "Confirmar ejecución",
-            f"¿Cargar y ejecutar '{name}'?\n\n"
+            f"¿Cargar y preparar '{name}'?\n\n"
             f"Secciones : {self.recipe_service.get_section_count(recipe)}\n"
             f"Espesor   : {recipe.get('espesorX10', 10) / 10:.1f}mm\n\n"
-            f"El motor arrancará al pisar el PEDAL."
+            f"START preparará el siguiente evento de receta.\n"
+            f"El movimiento real del mandril quedará para el PEDAL."
         ):
             return
 
         def _thread():
             self.log(f"=== CARGANDO '{name}' ===", "info")
-            self._send_recipe_thread(recipe)
-            time.sleep(0.3)
 
-            self.after(
-                0,
-                lambda r=recipe, n=name: self._set_runtime_recipe(
-                    r,
-                    n,
-                    section_index=0,
-                    reset_baseline=True,
-                ),
-            )
-
-            commands = self.recipe_service.build_stm32_run_commands(recipe)
-
-            has_error = False
-            last_response = None
-
-            for label, command in commands:
-                resp = self.serial.send(command)
-                self.log(f"RUN STM32 {label}: {command} → {resp}", "ok")
-                last_response = resp
-
-                if resp and any("ERR" in str(x) or "CMD?" in str(x) for x in resp):
-                    has_error = True
-
-            if has_error:
-                self.after(
-                    0,
-                    lambda r=last_response: messagebox.showerror(
-                        "Error",
-                        f"Controlador rechazó RUN STM32:\n{r}",
-                    )
-                )
+            ok = self._send_recipe_thread(recipe)
+            if ok is False:
                 return
 
+            # Damos un pequeño margen para que _prepare_runtime_plan()
+            # se ejecute en el hilo de UI mediante self.after().
             self.after(
-                0,
-                lambda: self._show_alert(
-                    f"'{name}' cargada — Pise el PEDAL para arrancar",
-                    ACCENT_GREEN,
-                )
+                300,
+                self._start_next_runtime_event,
             )
 
         threading.Thread(target=_thread, daemon=True).start()
@@ -1127,6 +1099,240 @@ class App(ctk.CTk):
             self.machine.snapshot.current_layer = 1
             self.machine.snapshot.target_turns = 0.0
 
+    def _prepare_runtime_plan(self, recipe, name: str):
+        events = self.recipe_service.build_runtime_plan(recipe)
+
+        self.current_runtime_events = events
+        self.current_runtime_event_index = 0
+        self.current_runtime_active_event = None
+        self.current_runtime_waiting_pause = False
+        self.current_runtime_completed = False
+
+        self._set_runtime_recipe(
+            recipe,
+            name,
+            section_index=0,
+            reset_baseline=True,
+        )
+
+        self.log(f"Plan de receta generado: {len(events)} eventos", "info")
+
+        if events:
+            first = events[0]
+            self.log(f"Siguiente evento: {first.label}", "info")
+            self._show_alert(
+                f"Receta lista — START prepara: {first.label}",
+                ACCENT_BLUE,
+            )
+        else:
+            self._show_alert(
+                "Receta sin eventos ejecutables",
+                ACCENT_YELLOW,
+            )
+
+        return bool(events)
+
+    def _build_runtime_event_commands(self, event):
+        commands = []
+
+        idx = self.current_runtime_event_index
+        events = self.current_runtime_events
+
+        previous_event = events[idx - 1] if idx > 0 else None
+        new_section = previous_event is None or previous_event.section_index != event.section_index
+
+        # Si no es el primer evento, venimos de una pausa.
+        if idx > 0:
+            commands.append(("ACK PAUSA", "ACK_PAUSE"))
+
+        # Inicio real de receta: reseteo completo.
+        if idx == 0:
+            commands.append(("RESET RECETA", "SYNC_RESET"))
+
+        # Nueva sección: resetear solo vueltas, no posición de husillo.
+        elif new_section:
+            commands.append(("RESET VUELTAS SECCIÓN", "VT_RESET"))
+
+        # Mantener espesor actualizado por seguridad.
+        esp_x100 = self.recipe_service.get_espesor_x100(self.current_runtime_recipe)
+        commands.append(("ESPESOR", f"SET_ESP_X100:{esp_x100}"))
+
+        if event.uses_husillo:
+            commands.append(("DIRECCIÓN", f"SET_SYNC_DIR:{event.direction}"))
+
+        commands.append(("MOTIVO", f"SET_TARGET_REASON:{event.event_type}"))
+        commands.append(("OBJETIVO", f"SET_TARGET_VT_X100:{event.vt_x100}"))
+        commands.append(("TARGET", "TARGET_ON"))
+
+        if event.uses_husillo:
+            commands.append(("SYNC", "SYNC_ON"))
+        else:
+            commands.append(("SYNC", "SYNC_OFF"))
+
+        return commands
+
+    def _start_next_runtime_event(self) -> bool:
+        if not self.connected:
+            messagebox.showerror("Error", "No hay conexión con el controlador")
+            return True
+
+        if not self.current_runtime_recipe or not self.current_runtime_events:
+            return False
+
+        if self.current_runtime_waiting_pause:
+            self._show_alert(
+                "Evento en curso — espere la pausa por objetivo",
+                ACCENT_YELLOW,
+            )
+            return True
+
+        if self.current_runtime_event_index >= len(self.current_runtime_events):
+            self._show_alert(
+                "✓ Receta completa — no hay más eventos",
+                ACCENT_GREEN,
+            )
+            self.log("START ignorado: receta completa", "ok")
+            return True
+
+        event = self.current_runtime_events[self.current_runtime_event_index]
+
+        def _worker():
+            self.log(
+                f"=== EVENTO {self.current_runtime_event_index + 1}/"
+                f"{len(self.current_runtime_events)} ===",
+                "info",
+            )
+            self.log(event.label, "info")
+
+            commands = self._build_runtime_event_commands(event)
+
+            has_error = False
+            last_response = None
+
+            pause_reached_immediately = False
+
+            for label, command in commands:
+                resp = self.serial.send(command)
+                self.log(f"  {label}: {command} → {resp}", "ok")
+                last_response = resp
+
+                if resp and any("PAUSE_TARGET" in str(x) for x in resp):
+                    pause_reached_immediately = True
+                    break
+
+                if resp and any("ERR" in str(x) or "CMD?" in str(x) for x in resp):
+                    has_error = True
+                    break
+
+            if has_error:
+                self.after(
+                    0,
+                    lambda r=last_response: messagebox.showerror(
+                        "Error",
+                        f"STM32 rechazó evento de receta:\n{r}",
+                    )
+                )
+                self.after(
+                    0,
+                    lambda: self._show_alert(
+                        "Error al preparar evento de receta",
+                        ACCENT_RED,
+                    )
+                )
+                return
+            
+            if pause_reached_immediately:
+                def _mark_immediate_pause():
+                    self.current_runtime_active_event = event
+                    self.current_runtime_waiting_pause = True
+                    self.current_runtime_section_index = event.section_index
+
+                    self.esp_sec.set(str(event.section_number))
+                    self.esp_capa.set(str(event.layer_number) if event.layer_number else "--")
+                    self.esp_meta.set(f"{event.turns:.2f}")
+
+                    self._complete_runtime_event(event)
+
+                self.after(0, _mark_immediate_pause)
+                return
+
+            def _mark_started():
+                self.current_runtime_active_event = event
+                self.current_runtime_waiting_pause = True
+                self.current_runtime_section_index = event.section_index
+
+                self.esp_sec.set(str(event.section_number))
+                self.esp_capa.set(str(event.layer_number) if event.layer_number else "--")
+                self.esp_meta.set(f"{event.turns:.2f}")
+
+                if event.uses_husillo:
+                    modo = f"HUSILLO {event.direction}"
+                else:
+                    modo = "SIN HUSILLO"
+
+                self._show_alert(
+                    f"▶ Evento armado: {event.label} — {modo}",
+                    ACCENT_GREEN,
+                )
+
+            self.after(0, _mark_started)
+
+        threading.Thread(target=_worker, daemon=True).start()
+        return True
+
+    def _mark_runtime_event_paused(self, status):
+        if not self.current_runtime_waiting_pause:
+            return
+
+        if not getattr(status, "is_paused_target", False):
+            return
+
+        event = self.current_runtime_active_event
+        self._complete_runtime_event(event)
+
+    def _finish_runtime_recipe(self):
+        recipe_name = self.current_runtime_recipe_name or self.run_recipe_var.get() or "Receta"
+
+        self.current_runtime_waiting_pause = False
+        self.current_runtime_active_event = None
+        self.current_runtime_completed = True
+
+        self.log(f"✓ RECETA COMPLETA: {recipe_name}", "ok")
+
+        self.esp_estado.set("Receta completa")
+        self.esp_meta.set("--")
+        self.esp_variador.set("Ciclo terminado")
+
+        self._show_alert(
+            f"✓ RECETA COMPLETA — {recipe_name}",
+            ACCENT_GREEN,
+        )
+
+        if hasattr(self, "control_tab") and self.control_tab:
+            self.control_tab.set_alert(
+                f"✓ RECETA COMPLETA — {recipe_name}",
+                ACCENT_GREEN,
+            )
+
+    def _complete_runtime_event(self, event):
+        self.current_runtime_waiting_pause = False
+        self.current_runtime_active_event = None
+        self.current_runtime_event_index += 1
+
+        if event:
+            self.log(f"✓ Evento completado: {event.label}", "ok")
+
+        if self.current_runtime_event_index >= len(self.current_runtime_events):
+            self._finish_runtime_recipe()
+            return
+
+        next_event = self.current_runtime_events[self.current_runtime_event_index]
+        self._show_alert(
+            f"⏸ Pausa por objetivo — START prepara: {next_event.label}",
+            ACCENT_YELLOW,
+        )
+        self.log(f"Siguiente evento: {next_event.label}", "info")
+
     def _get_runtime_layer_info(self, turns: float) -> dict:
         recipe = self.current_runtime_recipe
         if not recipe:
@@ -1178,21 +1384,21 @@ class App(ctk.CTk):
         """
         Combina:
         - receta local Python
-        - VT_x100 de STM32
+        - VT_ABS_x100 de STM32
 
         para pintar panel izquierdo como antes.
         """
-        raw_vt_x100 = self._safe_int_value(getattr(status, "turns_x100", "0"), 0)
-        self.last_stm32_vt_x100 = raw_vt_x100
+        raw_vt_abs_x100 = self._safe_int_value(
+            getattr(status, "vt_abs_x100", "") or getattr(status, "turns_x100", "0"),
+            0,
+        )
+
+        self.last_stm32_vt_x100 = raw_vt_abs_x100
 
         if not self.current_runtime_recipe:
             return False
 
-        relative_x100 = raw_vt_x100 - self.current_runtime_vt_base_x100
-
-        # Para avance de receta usamos magnitud de vueltas.
-        # El signo del encoder depende del sentido físico.
-        turns = abs(relative_x100) / 100.0
+        turns = abs(raw_vt_abs_x100) / 100.0
 
         info = self._get_runtime_layer_info(turns)
         if not info:
@@ -1200,12 +1406,18 @@ class App(ctk.CTk):
 
         recipe_name = self.current_runtime_recipe_name or "--"
 
+        active_event = self.current_runtime_active_event
+        target_text = info.get("target", "--")
+
+        if active_event is not None:
+            target_text = f"{active_event.turns:.2f}"
+
         self.esp_rec.set(recipe_name)
         self.esp_sec.set(info.get("section", "--"))
         self.esp_tsec.set(info.get("total_sections", "--"))
         self.esp_capa.set(info.get("layer", "--"))
         self.esp_tcap.set(info.get("total_layers", "--"))
-        self.esp_meta.set(info.get("target", "--"))
+        self.esp_meta.set(target_text)
         self.esp_vueltas.set(info.get("turns", "0.00"))
 
         if hasattr(self.machine, "snapshot"):
@@ -1213,7 +1425,11 @@ class App(ctk.CTk):
             snap.recipe_name = recipe_name
             snap.current_turns = turns
             snap.current_layer = self._safe_int_value(info.get("layer", "0"), 0)
-            snap.target_turns = float(info.get("target", "0") or 0)
+
+            try:
+                snap.target_turns = float(str(target_text).replace("--", "0"))
+            except Exception:
+                snap.target_turns = 0.0
 
         return True
 
@@ -1283,11 +1499,19 @@ class App(ctk.CTk):
 
             self.after(0, lambda v=status.layer_display: self.esp_capa.set(v))
 
-        if status.alert_text and status.alert_color:
+        allow_status_alert = True
+
+        if getattr(self, "current_runtime_completed", False):
+            if getattr(status, "state_machine", "") in ("PAUSED_TARGET", "IDLE", "STOPPED"):
+                allow_status_alert = False
+
+        if status.alert_text and status.alert_color and allow_status_alert:
             self.after(
                 0,
                 lambda t=status.alert_text, c=status.alert_color: self._show_alert(t, c),
             )
+        if getattr(status, "is_paused_target", False):
+            self.after(0, lambda s=status: self._mark_runtime_event_paused(s))
 
     def _start_status_polling(self):
         if self.use_simulator:

@@ -1,0 +1,188 @@
+{
+  "nombre": "500DY1320480AL",
+  "espesorX10": 28,
+  "secciones": [
+    {
+      "tipo": "BAR",
+      "nombre": "BARRERA BAJA TENSION",
+      "capas": [
+        4.0
+      ],
+      "dirs": [
+        true
+      ],
+      "derivaciones": []
+    },
+    {
+      "tipo": "LAM",
+      "nombre": "BAJA TENSION ALUMINIO",
+      "capas": [
+        20.0
+      ],
+      "dirs": [
+        true
+      ],
+      "derivaciones": [
+        {
+          "vuelta": 2.5,
+          "etiqueta": "PARADA 1",
+          "mensaje": "COLOCA SEPARADORES"
+        },
+        {
+          "vuelta": 3.0,
+          "etiqueta": "PARADA 2",
+          "mensaje": "COLOCA SEPARADORES"
+        },
+        {
+          "vuelta": 5.5,
+          "etiqueta": "PARADA 3",
+          "mensaje": "COLOCA SEPARADORES"
+        },
+        {
+          "vuelta": 6.0,
+          "etiqueta": "PARADA 4",
+          "mensaje": "COLOCA SEPARADORES"
+        },
+        {
+          "vuelta": 8.5,
+          "etiqueta": "PARADA 5",
+          "mensaje": "COLOCA SEPARADORES"
+        },
+        {
+          "vuelta": 9.0,
+          "etiqueta": "PARADA 6",
+          "mensaje": "COLOCA SEPARADORES"
+        },
+        {
+          "vuelta": 11.5,
+          "etiqueta": "PARADA 7",
+          "mensaje": "COLOCA SEPARADORES"
+        },
+        {
+          "vuelta": 14.5,
+          "etiqueta": "PARADA 8",
+          "mensaje": "COLOCA SEPARADORES"
+        },
+        {
+          "vuelta": 15.0,
+          "etiqueta": "PARADA 8",
+          "mensaje": "COLOCA SEPARADORES"
+        },
+        {
+          "vuelta": 17.5,
+          "etiqueta": "PARADA 9",
+          "mensaje": "COLOCA SEPARADORES"
+        },
+        {
+          "vuelta": 18.0,
+          "etiqueta": "PARADA 10",
+          "mensaje": "COLOCA SEPARADORES"
+        }
+      ]
+    },
+    {
+      "tipo": "BAR",
+      "nombre": "PAPEL",
+      "capas": [
+        15.0
+      ],
+      "dirs": [
+        true
+      ],
+      "derivaciones": []
+    },
+    {
+      "tipo": "BOB",
+      "nombre": "ALTA TENSION",
+      "capas": [
+        92.0,
+        184.0,
+        276.0,
+        368.0,
+        460.0,
+        552.0,
+        644.0,
+        736.0,
+        828.0,
+        920.0,
+        1000.0
+      ],
+      "dirs": [
+        true,
+        false,
+        true,
+        false,
+        true,
+        false,
+        true,
+        false,
+        true,
+        false,
+        true
+      ],
+      "derivaciones": [
+        {
+          "vuelta": 183.5,
+          "etiqueta": "PARADA",
+          "mensaje": "COLOCA SEPARADORES"
+        },
+        {
+          "vuelta": 367.5,
+          "etiqueta": "PARADA",
+          "mensaje": "COLOCA SEPARADORES"
+        },
+        {
+          "vuelta": 452.0,
+          "etiqueta": "TAP 1",
+          "mensaje": "SACA PUNTAS"
+        },
+        {
+          "vuelta": 476.0,
+          "etiqueta": "TAP 2",
+          "mensaje": "SACA PUNTAS"
+        },
+        {
+          "vuelta": 500.0,
+          "etiqueta": "CORTE",
+          "mensaje": "SACA PUNTAS"
+        },
+        {
+          "vuelta": 523.0,
+          "etiqueta": "TAP4",
+          "mensaje": "SACA PUNTAS"
+        },
+        {
+          "vuelta": 547.0,
+          "etiqueta": "TAP5",
+          "mensaje": "SACA PUNTAS"
+        },
+        {
+          "vuelta": 551.5,
+          "etiqueta": "PARADA",
+          "mensaje": "COLOCA SEPARADORES"
+        },
+        {
+          "vuelta": 735.5,
+          "etiqueta": "PARADA",
+          "mensaje": "COLOCA SEPARADORES"
+        },
+        {
+          "vuelta": 919.5,
+          "etiqueta": "PARADA",
+          "mensaje": "COLOCA SEPARADORES"
+        }
+      ]
+    },
+    {
+      "tipo": "BAR",
+      "nombre": "ULTIMA BARRERA",
+      "capas": [
+        15.0
+      ],
+      "dirs": [
+        true
+      ],
+      "derivaciones": []
+    }
+  ]
+}
